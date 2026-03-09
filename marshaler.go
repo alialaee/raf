@@ -7,11 +7,56 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 )
+
+type cachedField struct {
+	index int
+	name  []byte
+}
+
+type structFields struct {
+	fields []cachedField  // sorted by name, for marshal
+	byName map[string]int // name to struct field index, for unmarshal
+}
+
+func computeStructFields(rt reflect.Type) *structFields {
+	n := rt.NumField()
+	fields := make([]cachedField, 0, n)
+	byName := make(map[string]int, n)
+	for i := 0; i < n; i++ {
+		f := rt.Field(i)
+		skip, name := fieldName(f)
+		if skip {
+			continue
+		}
+		fields = append(fields, cachedField{index: i, name: []byte(name)})
+		byName[name] = i
+	}
+	sort.Slice(fields, func(i, j int) bool {
+		return bytes.Compare(fields[i].name, fields[j].name) < 0
+	})
+	return &structFields{fields: fields, byName: byName}
+}
+
+// Marshaler encodes Go values to RAF format, caching reflect metadata for struct types.
+// A zero-value Marshaler is ready to use.
+type Marshaler struct {
+	cache sync.Map // reflect.Type to *structFields
+}
+
+func (m *Marshaler) getStructFields(rt reflect.Type) *structFields {
+	if v, ok := m.cache.Load(rt); ok {
+		return v.(*structFields)
+	}
+	sf := computeStructFields(rt)
+	v, _ := m.cache.LoadOrStore(rt, sf)
+	return v.(*structFields)
+}
 
 // Marshal returns the RAF encoding of v.
 // v must be a struct, a map with string keys, or a pointer to one of them.
-func Marshal(v any) ([]byte, error) {
+func (m *Marshaler) Marshal(v any) ([]byte, error) {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
 		return nil, errors.New("raf: Marshal(nil)")
@@ -29,13 +74,13 @@ func Marshal(v any) ([]byte, error) {
 	}
 
 	builder := NewBuilder()
-	if err := marshalMapOrStruct(builder, rv); err != nil {
+	if err := m.marshalMapOrStruct(builder, rv); err != nil {
 		return nil, err
 	}
 	return builder.Build(nil)
 }
 
-func marshalToBuilder(builder *Builder, rv reflect.Value, key []byte) error {
+func (m *Marshaler) marshalToBuilder(builder *Builder, rv reflect.Value, key []byte) error {
 	for rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface {
 		if rv.IsNil() {
 			return builder.AddNull(key)
@@ -59,7 +104,7 @@ func marshalToBuilder(builder *Builder, rv reflect.Value, key []byte) error {
 			return builder.AddNull(key)
 		}
 		innerBuilder := NewBuilder()
-		if err := marshalMapOrStruct(innerBuilder, rv); err != nil {
+		if err := m.marshalMapOrStruct(innerBuilder, rv); err != nil {
 			return err
 		}
 		innerBytes, err := innerBuilder.Build(nil)
@@ -80,30 +125,29 @@ func marshalToBuilder(builder *Builder, rv reflect.Value, key []byte) error {
 	}
 }
 
-func marshalMapOrStruct(builder *Builder, rv reflect.Value) error {
+func (m *Marshaler) marshalMapOrStruct(builder *Builder, rv reflect.Value) error {
+	if rv.Kind() == reflect.Struct {
+		sf := m.getStructFields(rv.Type())
+		for _, f := range sf.fields {
+			if err := m.marshalToBuilder(builder, rv.Field(f.index), f.name); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	type kv struct {
 		key []byte
 		val reflect.Value
 	}
-	var pairs []kv
 
-	if rv.Kind() == reflect.Map {
-		if rv.Type().Key().Kind() != reflect.String {
-			return errors.New("raf: map key must be string")
-		}
-		for _, k := range rv.MapKeys() {
-			pairs = append(pairs, kv{key: []byte(k.String()), val: rv.MapIndex(k)})
-		}
-	} else if rv.Kind() == reflect.Struct {
-		rt := rv.Type()
-		for i := 0; i < rt.NumField(); i++ {
-			f := rt.Field(i)
-			skip, name := fieldName(f)
-			if skip {
-				continue
-			}
-			pairs = append(pairs, kv{key: []byte(name), val: rv.Field(i)})
-		}
+	if rv.Type().Key().Kind() != reflect.String {
+		return errors.New("raf: map key must be string")
+	}
+
+	pairs := make([]kv, 0, rv.Len())
+	for _, k := range rv.MapKeys() {
+		pairs = append(pairs, kv{key: []byte(k.String()), val: rv.MapIndex(k)})
 	}
 
 	sort.Slice(pairs, func(i, j int) bool {
@@ -111,7 +155,7 @@ func marshalMapOrStruct(builder *Builder, rv reflect.Value) error {
 	})
 
 	for _, p := range pairs {
-		if err := marshalToBuilder(builder, p.val, p.key); err != nil {
+		if err := m.marshalToBuilder(builder, p.val, p.key); err != nil {
 			return err
 		}
 	}
@@ -185,8 +229,23 @@ func indirect(v reflect.Value) reflect.Value {
 	return v
 }
 
+// Unmarshaler decodes RAF data into Go values, caching reflect metadata for struct types.
+// A zero-value Unmarshaler is ready to use.
+type Unmarshaler struct {
+	cache sync.Map // reflect.Type to *structFields
+}
+
+func (u *Unmarshaler) getStructFields(rt reflect.Type) *structFields {
+	if v, ok := u.cache.Load(rt); ok {
+		return v.(*structFields)
+	}
+	sf := computeStructFields(rt)
+	v, _ := u.cache.LoadOrStore(rt, sf)
+	return v.(*structFields)
+}
+
 // Unmarshal parses the RAF-encoded data and stores the result in the value pointed to by v.
-func Unmarshal(data []byte, v any) error {
+func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return errors.New("raf: Unmarshal(non-pointer or nil)")
@@ -198,10 +257,10 @@ func Unmarshal(data []byte, v any) error {
 		return errors.New("raf: invalid block structure")
 	}
 
-	return unmarshalMapOrStruct(block, rv)
+	return u.unmarshalMapOrStruct(block, rv)
 }
 
-func unmarshalMapOrStruct(block Block, rv reflect.Value) error {
+func (u *Unmarshaler) unmarshalMapOrStruct(block Block, rv reflect.Value) error {
 	for rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
 			rv.Set(reflect.New(rv.Type().Elem()))
@@ -234,7 +293,7 @@ func unmarshalMapOrStruct(block Block, rv reflect.Value) error {
 		elemType := rv.Type().Elem()
 		for i := 0; i < block.NumPairs(); i++ {
 			elemPtr := reflect.New(elemType)
-			if err := unmarshalValue(block.ValueAt(i), elemPtr.Elem()); err != nil {
+			if err := u.unmarshalValue(block.ValueAt(i), elemPtr.Elem()); err != nil {
 				return err
 			}
 			rv.SetMapIndex(reflect.ValueOf(string(block.KeyAt(i))), elemPtr.Elem())
@@ -243,20 +302,11 @@ func unmarshalMapOrStruct(block Block, rv reflect.Value) error {
 	}
 
 	if rv.Kind() == reflect.Struct {
-		rt := rv.Type()
-		fields := make(map[string]int)
-		for i := 0; i < rt.NumField(); i++ {
-			f := rt.Field(i)
-			skip, name := fieldName(f)
-			if skip {
-				continue
-			}
-			fields[name] = i
-		}
+		sf := u.getStructFields(rv.Type())
 
 		for i := 0; i < block.NumPairs(); i++ {
-			if fieldIdx, ok := fields[string(block.KeyAt(i))]; ok {
-				if err := unmarshalValue(block.ValueAt(i), rv.Field(fieldIdx)); err != nil {
+			if fieldIdx, ok := sf.byName[string(block.KeyAt(i))]; ok {
+				if err := u.unmarshalValue(block.ValueAt(i), rv.Field(fieldIdx)); err != nil {
 					return err
 				}
 			}
@@ -267,7 +317,7 @@ func unmarshalMapOrStruct(block Block, rv reflect.Value) error {
 	return fmt.Errorf("raf: unsupported type %s to unmarshal into from map", rv.Type().String())
 }
 
-func unmarshalValue(val Value, rv reflect.Value) error {
+func (u *Unmarshaler) unmarshalValue(val Value, rv reflect.Value) error {
 	for rv.Kind() == reflect.Pointer {
 		if val.Type == TypeNull {
 			rv.SetZero()
@@ -331,14 +381,14 @@ func unmarshalValue(val Value, rv reflect.Value) error {
 			return fmt.Errorf("raf: cannot unmarshal bool into %s", rv.Type())
 		}
 	case TypeMap:
-		return unmarshalMapOrStruct(val.Map(), rv)
+		return u.unmarshalMapOrStruct(val.Map(), rv)
 	case TypeArray:
 		arr := val.Array()
 		if rv.Kind() == reflect.Slice {
 			rv.Set(reflect.MakeSlice(rv.Type(), arr.Len(), arr.Len()))
 			for i := 0; i < arr.Len(); i++ {
 				elemVal := Value{Type: arr.ElemType(), Data: arr.At(i)}
-				if err := unmarshalValue(elemVal, rv.Index(i)); err != nil {
+				if err := u.unmarshalValue(elemVal, rv.Index(i)); err != nil {
 					return err
 				}
 			}
@@ -387,4 +437,20 @@ func valueToInterface(val Value) (any, error) {
 	default:
 		return nil, fmt.Errorf("raf: unknown value type %d", val.Type)
 	}
+}
+
+var (
+	defaultMarshaler   = &Marshaler{}
+	defaultUnmarshaler = &Unmarshaler{}
+)
+
+// Marshal returns the RAF encoding of v.
+// v must be a struct, a map with string keys, or a pointer to one of them.
+func Marshal(v any) ([]byte, error) {
+	return defaultMarshaler.Marshal(v)
+}
+
+// Unmarshal parses the RAF-encoded data and stores the result in the value pointed to by v.
+func Unmarshal(data []byte, v any) error {
+	return defaultUnmarshaler.Unmarshal(data, v)
 }
