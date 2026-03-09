@@ -55,8 +55,8 @@ func BenchmarkBlockGet(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		vt, _, ok := block.Get(searchKey)
-		if !ok || vt != TypeInt64 {
+		val, ok := block.Get(searchKey)
+		if !ok || val.Type != TypeInt64 {
 			b.Fatal("not found or wrong type")
 		}
 	}
@@ -80,8 +80,8 @@ func BenchmarkLookup(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		vt, _, ok := block.Get(searchKey)
-		if !ok || vt != TypeFloat64 {
+		val, ok := block.Get(searchKey)
+		if !ok || val.Type != TypeFloat64 {
 			b.Fatal("not found or wrong type")
 		}
 	}
@@ -215,11 +215,11 @@ func BenchmarkArrayRead(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		vt, vb, ok := block.Get(searchKey)
-		if !ok || vt != TypeArray {
+		val, ok := block.Get(searchKey)
+		if !ok || val.Type != TypeArray {
 			b.Fatal("not found or wrong type")
 		}
-		arr := Array(vb)
+		arr := val.Array()
 		// Access every element
 		for i := range arr.Len() {
 			_ = arr.At(i)
@@ -278,13 +278,13 @@ func BenchmarkMapRead(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		vt, vb, ok := block.Get(metaKey)
-		if !ok || vt != TypeMap {
+		val, ok := block.Get(metaKey)
+		if !ok || val.Type != TypeMap {
 			b.Fatal("map not found")
 		}
-		innerBlock := Block(vb)
-		ivt, ivb, iok := innerBlock.Get(nameKey)
-		if !iok || ivt != TypeString || string(ivb) != "Ali" {
+		innerBlock := val.Map()
+		ival, iok := innerBlock.Get(nameKey)
+		if !iok || ival.Type != TypeString || ival.String() != "Ali" {
 			b.Fatal("inner value mismatch")
 		}
 	}

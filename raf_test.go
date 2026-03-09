@@ -67,51 +67,51 @@ func TestBuilderAndBlockBasic(t *testing.T) {
 	}
 
 	// Check "a_string"
-	vt, vb, ok := block.Get([]byte("a_string"))
-	if !ok || vt != TypeString || string(vb) != "hello world" {
-		t.Errorf("Failed string check: %v %v %v", ok, vt, string(vb))
+	val, ok := block.Get([]byte("a_string"))
+	if !ok || val.Type != TypeString || val.String() != "hello world" {
+		t.Errorf("Failed string check: %v %v %v", ok, val.Type, val.String())
 	}
 
 	// Check "b_false"
-	vt, vb, ok = block.Get([]byte("b_false"))
-	if !ok || vt != TypeBool || len(vb) != 1 || vb[0] != 0 {
-		t.Errorf("Failed bool false check: %v %v %v", ok, vt, vb)
+	val, ok = block.Get([]byte("b_false"))
+	if !ok || val.Type != TypeBool || val.Bool() != false {
+		t.Errorf("Failed bool false check: %v %v %v", ok, val.Type, val.Bool())
 	}
 
 	// Check "b_true"
-	vt, vb, ok = block.Get([]byte("b_true"))
-	if !ok || vt != TypeBool || len(vb) != 1 || vb[0] == 0 {
-		t.Errorf("Failed bool true check: %v %v %v", ok, vt, vb)
+	val, ok = block.Get([]byte("b_true"))
+	if !ok || val.Type != TypeBool || val.Bool() != true {
+		t.Errorf("Failed bool true check: %v %v %v", ok, val.Type, val.Bool())
 	}
 
 	// Check "c_float"
-	vt, vb, ok = block.Get([]byte("c_float"))
-	if !ok || vt != TypeFloat64 || len(vb) != 8 {
-		t.Fatalf("Failed float check: %v %v %v", ok, vt, vb)
+	val, ok = block.Get([]byte("c_float"))
+	if !ok || val.Type != TypeFloat64 {
+		t.Fatalf("Failed float check: %v %v %v", ok, val.Type, val.Data)
 	}
-	fval := math.Float64frombits(binary.BigEndian.Uint64(vb))
+	fval := val.Float64()
 	if fval != 3.14159 {
 		t.Errorf("Expected 3.14159, got %v", fval)
 	}
 
 	// Check "d_int"
-	vt, vb, ok = block.Get([]byte("d_int"))
-	if !ok || vt != TypeInt64 || len(vb) != 8 {
-		t.Fatalf("Failed int check: %v %v %v", ok, vt, vb)
+	val, ok = block.Get([]byte("d_int"))
+	if !ok || val.Type != TypeInt64 {
+		t.Fatalf("Failed int check: %v %v %v", ok, val.Type, val.Data)
 	}
-	ival := int64(binary.BigEndian.Uint64(vb))
+	ival := val.Int64()
 	if ival != -42 {
 		t.Errorf("Expected -42, got %v", ival)
 	}
 
 	// Check "e_null"
-	vt, vb, ok = block.Get([]byte("e_null"))
-	if !ok || vt != TypeNull || len(vb) != 0 {
-		t.Errorf("Failed null check: %v %v %v", ok, vt, vb)
+	val, ok = block.Get([]byte("e_null"))
+	if !ok || val.Type != TypeNull || len(val.Data) != 0 {
+		t.Errorf("Failed null check: %v %v %v", ok, val.Type, val.Data)
 	}
 
 	// Check non-existent
-	_, _, ok = block.Get([]byte("z_missing"))
+	_, ok = block.Get([]byte("z_missing"))
 	if ok {
 		t.Error("Expected missing key to return not ok")
 	}
@@ -230,11 +230,11 @@ func TestArrayTypes(t *testing.T) {
 	}
 
 	// === String array ===
-	vt, vb, ok := block.Get([]byte("a_strings"))
-	if !ok || vt != TypeArray {
-		t.Fatalf("Failed string array lookup: ok=%v vt=%d", ok, vt)
+	val, ok := block.Get([]byte("a_strings"))
+	if !ok || val.Type != TypeArray {
+		t.Fatalf("Failed string array lookup: ok=%v vt=%d", ok, val.Type)
 	}
-	arr := Array(vb)
+	arr := val.Array()
 	if arr.ElemType() != TypeString {
 		t.Fatalf("Expected TypeString elements, got %d", arr.ElemType())
 	}
@@ -249,11 +249,11 @@ func TestArrayTypes(t *testing.T) {
 	}
 
 	// === Bool array ===
-	vt, vb, ok = block.Get([]byte("b_bools"))
-	if !ok || vt != TypeArray {
+	val, ok = block.Get([]byte("b_bools"))
+	if !ok || val.Type != TypeArray {
 		t.Fatalf("Failed bool array lookup")
 	}
-	arr = Array(vb)
+	arr = val.Array()
 	if arr.ElemType() != TypeBool || arr.Len() != 3 {
 		t.Fatalf("Bool array header: type=%d len=%d", arr.ElemType(), arr.Len())
 	}
@@ -266,11 +266,11 @@ func TestArrayTypes(t *testing.T) {
 	}
 
 	// === Float64 array ===
-	vt, vb, ok = block.Get([]byte("c_floats"))
-	if !ok || vt != TypeArray {
+	val, ok = block.Get([]byte("c_floats"))
+	if !ok || val.Type != TypeArray {
 		t.Fatalf("Failed float64 array lookup")
 	}
-	arr = Array(vb)
+	arr = val.Array()
 	if arr.ElemType() != TypeFloat64 || arr.Len() != 3 {
 		t.Fatalf("Float64 array header: type=%d len=%d", arr.ElemType(), arr.Len())
 	}
@@ -283,11 +283,11 @@ func TestArrayTypes(t *testing.T) {
 	}
 
 	// === Int64 array ===
-	vt, vb, ok = block.Get([]byte("d_ints"))
-	if !ok || vt != TypeArray {
+	val, ok = block.Get([]byte("d_ints"))
+	if !ok || val.Type != TypeArray {
 		t.Fatalf("Failed int64 array lookup")
 	}
-	arr = Array(vb)
+	arr = val.Array()
 	if arr.ElemType() != TypeInt64 || arr.Len() != 3 {
 		t.Fatalf("Int64 array header: type=%d len=%d", arr.ElemType(), arr.Len())
 	}
@@ -300,11 +300,11 @@ func TestArrayTypes(t *testing.T) {
 	}
 
 	// === Empty array ===
-	vt, vb, ok = block.Get([]byte("e_empty"))
-	if !ok || vt != TypeArray {
+	val, ok = block.Get([]byte("e_empty"))
+	if !ok || val.Type != TypeArray {
 		t.Fatalf("Failed empty array lookup")
 	}
-	arr = Array(vb)
+	arr = val.Array()
 	if arr.ElemType() != TypeString || arr.Len() != 0 {
 		t.Fatalf("Empty array: type=%d len=%d", arr.ElemType(), arr.Len())
 	}
@@ -360,11 +360,11 @@ func TestMapType(t *testing.T) {
 	}
 
 	// === Read inner map ===
-	vt, vb, ok := block.Get([]byte("a_map"))
-	if !ok || vt != TypeMap {
-		t.Fatalf("Failed map lookup: ok=%v vt=%d", ok, vt)
+	val, ok := block.Get([]byte("a_map"))
+	if !ok || val.Type != TypeMap {
+		t.Fatalf("Failed map lookup: ok=%v vt=%d", ok, val.Type)
 	}
-	innerBlock := Block(vb)
+	innerBlock := val.Map()
 	if !innerBlock.Valid() {
 		t.Fatal("Inner block should be valid")
 	}
@@ -372,40 +372,40 @@ func TestMapType(t *testing.T) {
 		t.Fatalf("Inner: expected 2 pairs, got %d", innerBlock.NumPairs())
 	}
 
-	ivt, ivb, iok := innerBlock.Get([]byte("x_val"))
-	if !iok || ivt != TypeString || string(ivb) != "hello" {
-		t.Errorf("Inner x_val: ok=%v vt=%d val=%q", iok, ivt, ivb)
+	ival, iok := innerBlock.Get([]byte("x_val"))
+	if !iok || ival.Type != TypeString || ival.String() != "hello" {
+		t.Errorf("Inner x_val: ok=%v vt=%d val=%q", iok, ival.Type, ival.String())
 	}
 
-	ivt, ivb, iok = innerBlock.Get([]byte("y_val"))
-	if !iok || ivt != TypeInt64 || len(ivb) != 8 {
-		t.Fatalf("Inner y_val: ok=%v vt=%d", iok, ivt)
+	ival, iok = innerBlock.Get([]byte("y_val"))
+	if !iok || ival.Type != TypeInt64 {
+		t.Fatalf("Inner y_val: ok=%v vt=%d", iok, ival.Type)
 	}
-	ival := int64(binary.BigEndian.Uint64(ivb))
-	if ival != 42 {
-		t.Errorf("Inner y_val: expected 42, got %d", ival)
+	ival64 := ival.Int64()
+	if ival64 != 42 {
+		t.Errorf("Inner y_val: expected 42, got %d", ival64)
 	}
 
 	// === Read nested map ===
-	vt, vb, ok = block.Get([]byte("b_nested"))
-	if !ok || vt != TypeMap {
+	val, ok = block.Get([]byte("b_nested"))
+	if !ok || val.Type != TypeMap {
 		t.Fatalf("Failed nested map lookup")
 	}
-	nestedBlock := Block(vb)
+	nestedBlock := val.Map()
 	if !nestedBlock.Valid() {
 		t.Fatal("Nested block should be valid")
 	}
-	nvt, nvb, nok := nestedBlock.Get([]byte("deep"))
-	if !nok || nvt != TypeString || string(nvb) != "ok" {
-		t.Errorf("Nested deep: ok=%v vt=%d val=%q", nok, nvt, nvb)
+	nval, nok := nestedBlock.Get([]byte("deep"))
+	if !nok || nval.Type != TypeString || nval.String() != "ok" {
+		t.Errorf("Nested deep: ok=%v vt=%d val=%q", nok, nval.Type, nval.String())
 	}
 
 	// === Read empty map ===
-	vt, vb, ok = block.Get([]byte("c_empty"))
-	if !ok || vt != TypeMap {
+	val, ok = block.Get([]byte("c_empty"))
+	if !ok || val.Type != TypeMap {
 		t.Fatalf("Failed empty map lookup")
 	}
-	emptyBlock := Block(vb)
+	emptyBlock := val.Map()
 	if !emptyBlock.Valid() {
 		t.Fatal("Empty block should be valid")
 	}
@@ -414,8 +414,8 @@ func TestMapType(t *testing.T) {
 	}
 
 	// === Other fields ===
-	vt, vb, ok = block.Get([]byte("d_plain"))
-	if !ok || vt != TypeString || string(vb) != "top-level" {
-		t.Errorf("Plain value: ok=%v vt=%d val=%q", ok, vt, vb)
+	val, ok = block.Get([]byte("d_plain"))
+	if !ok || val.Type != TypeString || val.String() != "top-level" {
+		t.Errorf("Plain value: ok=%v vt=%d val=%q", ok, val.Type, val.String())
 	}
 }
