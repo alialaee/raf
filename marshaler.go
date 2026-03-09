@@ -24,7 +24,7 @@ func computeStructFields(rt reflect.Type) *structFields {
 	n := rt.NumField()
 	fields := make([]cachedField, 0, n)
 	byName := make(map[string]int, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		f := rt.Field(i)
 		skip, name := fieldName(f)
 		if skip {
@@ -42,7 +42,8 @@ func computeStructFields(rt reflect.Type) *structFields {
 // Marshaler encodes Go values to RAF format, caching reflect metadata for struct types.
 // A zero-value Marshaler is ready to use.
 type Marshaler struct {
-	cache sync.Map // reflect.Type to *structFields
+	cache       sync.Map // reflect.Type to *structFields
+	builderPool *sync.Pool
 }
 
 func (m *Marshaler) getStructFields(rt reflect.Type) *structFields {
@@ -57,6 +58,10 @@ func (m *Marshaler) getStructFields(rt reflect.Type) *structFields {
 // Marshal returns the RAF encoding of v.
 // v must be a struct, a map with string keys, or a pointer to one of them.
 func (m *Marshaler) Marshal(v any) ([]byte, error) {
+	if m.builderPool == nil {
+		m.builderPool = &sync.Pool{New: func() any { return NewBuilder() }}
+	}
+
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
 		return nil, errors.New("raf: Marshal(nil)")
@@ -73,7 +78,10 @@ func (m *Marshaler) Marshal(v any) ([]byte, error) {
 		return nil, errors.New("raf: Marshal called with unsupported root type, must be struct or map")
 	}
 
-	builder := NewBuilder()
+	builder := m.builderPool.Get().(*Builder)
+	defer m.builderPool.Put(builder)
+	builder.Reset()
+
 	if err := m.marshalMapOrStruct(builder, rv); err != nil {
 		return nil, err
 	}
@@ -193,25 +201,25 @@ func marshalArray(builder *Builder, rv reflect.Value, key []byte) error {
 	switch kind {
 	case reflect.String:
 		vals := make([][]byte, rv.Len())
-		for i := 0; i < rv.Len(); i++ {
+		for i := range rv.Len() {
 			vals[i] = []byte(indirect(rv.Index(i)).String())
 		}
 		return builder.AddStringArray(key, vals)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		vals := make([]int64, rv.Len())
-		for i := 0; i < rv.Len(); i++ {
+		for i := range rv.Len() {
 			vals[i] = indirect(rv.Index(i)).Int()
 		}
 		return builder.AddInt64Array(key, vals)
 	case reflect.Float32, reflect.Float64:
 		vals := make([]float64, rv.Len())
-		for i := 0; i < rv.Len(); i++ {
+		for i := range rv.Len() {
 			vals[i] = indirect(rv.Index(i)).Float()
 		}
 		return builder.AddFloat64Array(key, vals)
 	case reflect.Bool:
 		vals := make([]bool, rv.Len())
-		for i := 0; i < rv.Len(); i++ {
+		for i := range rv.Len() {
 			vals[i] = indirect(rv.Index(i)).Bool()
 		}
 		return builder.AddBoolArray(key, vals)
