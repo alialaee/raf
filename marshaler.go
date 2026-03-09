@@ -446,19 +446,3 @@ func valueToInterface(val Value) (any, error) {
 		return nil, fmt.Errorf("raf: unknown value type %d", val.Type)
 	}
 }
-
-var (
-	defaultMarshaler   = &Marshaler{}
-	defaultUnmarshaler = &Unmarshaler{}
-)
-
-// Marshal returns the RAF encoding of v.
-// v must be a struct, a map with string keys, or a pointer to one of them.
-func Marshal(v any) ([]byte, error) {
-	return defaultMarshaler.Marshal(v)
-}
-
-// Unmarshal parses the RAF-encoded data and stores the result in the value pointed to by v.
-func Unmarshal(data []byte, v any) error {
-	return defaultUnmarshaler.Unmarshal(data, v)
-}

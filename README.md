@@ -49,6 +49,51 @@ For details on the exact binary layout, see [`raf.go`](raf.go).
 
 ## Example Usage
 
+It's possible to use Marshaling and Unmarshaling for general cases, but for higher performance use-cases, it's recommended to use `Builder` and `Block` directly.
+
+### Marshaling and Unmarshaling
+
+`raf` supports encoding and decoding Go structs and maps using `Marshal` and `Unmarshal`, similar to `encoding/json`.
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/alialaee/raf"
+)
+
+type User struct {
+	ID       int64    `raf:"id"`
+	Name     string   `raf:"name"`
+	IsActive bool     `raf:"is_active"`
+	Roles    []string `raf:"roles"`
+}
+
+func main() {
+	user := User{
+		ID:       1,
+		Name:     "Ali",
+		IsActive: true,
+		Roles:    []string{"admin", "user"},
+	}
+
+	// Encode to raf binary format
+	data, err := raf.Marshal(user)
+	if err != nil {
+		panic(err)
+	}
+
+	// Decode back to a struct
+	var decoded User
+	if err := raf.Unmarshal(data, &decoded); err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Decoded: %+v\n", decoded)
+}
+```
+
 ### Building a Payload
 
 Use `raf.Builder` to construct your payload. It allocates memory and handles offsets.
