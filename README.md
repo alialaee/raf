@@ -96,9 +96,9 @@ Given a byte slice, you can quickly look up specific fields by casting it to `ra
 	}
 
 	// Look up by key directly
-	vt, vb, ok := block.Get([]byte("name"))
-	if ok && vt == raf.TypeString {
-		fmt.Printf("Name: %s\n", string(vb)) // Name: raf
+	val, ok := block.Get([]byte("name"))
+	if ok && val.Type == raf.TypeString {
+		fmt.Printf("Name: %s\n", val.String())
 	}
 ```
 

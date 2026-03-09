@@ -47,9 +47,9 @@ func (b Block) keyAt(i int, keysBegin int) []byte {
 	return b[keysBegin+startOff : keysBegin+endOff]
 }
 
-// ValueAt returns the value type and raw value bytes at the given index.
+// ValueAt returns the value at the given index.
 // It panics if i < 0 or i >= NumPairs().
-func (b Block) ValueAt(i int) (valType Type, val []byte) {
+func (b Block) ValueAt(i int) Value {
 	n := b.NumPairs()
 	valTypesBegin := 4 + (n+1)*2
 	valOffsetsBegin := valTypesBegin + n
@@ -62,7 +62,7 @@ func (b Block) ValueAt(i int) (valType Type, val []byte) {
 	return b.valueAt(i, valTypesBegin, valOffsetsBegin, valsBegin)
 }
 
-func (b Block) valueAt(i int, valTypesBegin, valOffsetsBegin, valsBegin int) (Type, []byte) {
+func (b Block) valueAt(i int, valTypesBegin, valOffsetsBegin, valsBegin int) Value {
 	valType := Type(b[valTypesBegin+i])
 
 	startOffsIdx := valOffsetsBegin + (i * 2)
@@ -71,15 +71,18 @@ func (b Block) valueAt(i int, valTypesBegin, valOffsetsBegin, valsBegin int) (Ty
 	startOff := int(binary.BigEndian.Uint16(b[startOffsIdx : startOffsIdx+2]))
 	endOff := int(binary.BigEndian.Uint16(b[endOffsIdx : endOffsIdx+2]))
 
-	return valType, b[valsBegin+startOff : valsBegin+endOff]
+	return Value{
+		Type: valType,
+		Data: b[valsBegin+startOff : valsBegin+endOff],
+	}
 }
 
 // Get performs a binary search to find the specified key.
-// It returns the value type, the zero-allocated raw value bytes, and true if found.
-func (b Block) Get(key []byte) (valType Type, val []byte, ok bool) {
+// It returns the value and true if found.
+func (b Block) Get(key []byte) (Value, bool) {
 	n := int(b[3])
 	if n == 0 {
-		return 0, nil, false
+		return Value{}, false
 	}
 
 	// Precompute all layout positions once.
@@ -100,11 +103,10 @@ func (b Block) Get(key []byte) (valType Type, val []byte, ok bool) {
 	}
 
 	if i < n && bytes.Equal(b.keyAt(i, keysBegin), key) {
-		vt, vb := b.valueAt(i, valTypesBegin, valOffsetsBegin, valsBegin)
-		return vt, vb, true
+		return b.valueAt(i, valTypesBegin, valOffsetsBegin, valsBegin), true
 	}
 
-	return 0, nil, false
+	return Value{}, false
 }
 
 // Array is a zero-allocation reader for an array value.
