@@ -1,0 +1,34 @@
+version: "2"
+
+linters-settings:
+  govet:
+    enable-all: true
+  gocyclo:
+    min-complexity: 15
+  errcheck:
+    ignoretests: true
+
+linters:
+  default: standard
+  enable:
+    - govet
+    - staticcheck
+    - ineffassign
+    - bodyclose
+    - unconvert
+    - unparam
+    - misspell
+    - errcheck
+  exclusions:
+    rules:
+      - path: ".*_test.go"
+        linters:
+          - errcheck
+          - gocyclo
+          - dupl
+          - gosec
+formatters:
+  enable:
+    - gofmt
+issues:
+  exclude-use-default: false
