@@ -18,11 +18,13 @@ Designed for fast read access across a few kilobytes of data, keys are sorted le
 - **Type-rich:** Supports types similar to JSON, see [Differences from JSON](#json-diff).
 - **Schema-less**
 - **Zero-dependency**
+- **Canonical serialization**
 
 ## Goals
 
 - Prioritize read performance and random access.
 - Keep the format simple to understand.
+- Canonical serialization (only one representation of a single data).
 - Be suitable for use both on the wire and on disk.
 - Provide a highly ergonomic API.
 - Keep schemas optional.
