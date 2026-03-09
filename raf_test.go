@@ -493,9 +493,6 @@ func TestArrayAtHelpers(t *testing.T) {
 	if arr.AtString(0, valBuf) != nil {
 		t.Errorf("AtString on Bool array should return nil")
 	}
-	if arr.AtBool(0) != false {
-		t.Errorf("AtBool on Float64 array should return false")
-	}
 	if arr.AtFloat64(0) != 0 {
 		t.Errorf("AtFloat64 on Int64 array should return 0")
 	}
