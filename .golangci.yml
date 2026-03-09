@@ -1,13 +1,5 @@
 version: "2"
 
-linters-settings:
-  govet:
-    enable-all: true
-  gocyclo:
-    min-complexity: 15
-  errcheck:
-    ignoretests: true
-
 linters:
   default: standard
   enable:
@@ -30,5 +22,3 @@ linters:
 formatters:
   enable:
     - gofmt
-issues:
-  exclude-use-default: false
