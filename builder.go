@@ -25,9 +25,9 @@ const (
 )
 
 var (
-	ErrBlockTooLarge = errors.New("flatkv: block too large (max 64KB)")
-	ErrTooManyPairs  = errors.New("flatkv: too many pairs (max 255)")
-	ErrInvalidKey    = errors.New("flatkv: key is not valid")
+	ErrBlockTooLarge = errors.New("raf: block too large (max 64KB)")
+	ErrTooManyPairs  = errors.New("raf: too many pairs (max 255)")
+	ErrInvalidKey    = errors.New("raf: key is not valid")
 )
 
 func (t Type) Size() int {
@@ -49,7 +49,7 @@ func (t Type) isDynamic() bool {
 	return t.Size() < 0
 }
 
-// Builder allows for zero-allocation encoding of flatkv blocks.
+// Builder allows for zero-allocation encoding of raf blocks.
 type Builder struct {
 	keys       []byte
 	vals       []byte

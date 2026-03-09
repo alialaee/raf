@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 )
 
-// Block is a zero-allocation reader for a flatkv formatted byte slice.
+// Block is a zero-allocation reader for a RAF formatted byte slice.
 // It is unsafe to use if Valid() returns false.
 type Block []byte
 
@@ -107,7 +107,7 @@ func (b Block) Get(key []byte) (valType Type, val []byte, ok bool) {
 	return 0, nil, false
 }
 
-// Array is a zero-allocation reader for a flatkv array value.
+// Array is a zero-allocation reader for an array value.
 // It reads from the raw value bytes returned by Block.ValueAt or Block.Get
 // when the value type is TypeArray.
 type Array []byte

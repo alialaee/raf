@@ -1,4 +1,4 @@
-// Package flatkv provides a simple, read-optimized binary format for key-value pairs.
+// Package raf provides a simple, read-optimized binary format for key-value pairs.
 // Keys are sorted lexicographically as raw bytes to allow fast retrieval.
 // It's designed for a few kilobytes of data, with a focus on fast read access.
 // All integer fields are stored in big-endian format.

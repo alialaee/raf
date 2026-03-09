@@ -62,7 +62,7 @@ func BenchmarkBlockGet(b *testing.B) {
 	}
 }
 
-func BenchmarkLookup_FlatKV(b *testing.B) {
+func BenchmarkLookup(b *testing.B) {
 	builder := NewBuilder()
 	builder.AddInt64([]byte("age"), 30)
 	builder.AddString([]byte("city"), []byte("Berlin"))
