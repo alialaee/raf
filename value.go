@@ -12,6 +12,14 @@ type Value struct {
 	Data []byte
 }
 
+// Bytes uses buf to return the value as a byte slice without additional allocations.
+func (v Value) Bytes(buf []byte) []byte {
+	if v.Type != TypeString {
+		return nil
+	}
+	return append(buf[0:0], v.Data...)
+}
+
 func (v Value) String() string {
 	if v.Type != TypeString {
 		return ""

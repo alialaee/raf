@@ -98,7 +98,7 @@ func (m *Marshaler) marshalToBuilder(builder *Builder, rv reflect.Value, key []b
 
 	switch rv.Kind() {
 	case reflect.String:
-		return builder.AddString(key, []byte(rv.String()))
+		return builder.AddStringString(key, rv.String())
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return builder.AddInt64(key, rv.Int())
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -200,11 +200,11 @@ func marshalArray(builder *Builder, rv reflect.Value, key []byte) error {
 
 	switch kind {
 	case reflect.String:
-		vals := make([][]byte, rv.Len())
+		vals := make([]string, rv.Len())
 		for i := range rv.Len() {
-			vals[i] = []byte(indirect(rv.Index(i)).String())
+			vals[i] = indirect(rv.Index(i)).String()
 		}
-		return builder.AddStringArray(key, vals)
+		return builder.AddStringStringArray(key, vals)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		vals := make([]int64, rv.Len())
 		for i := range rv.Len() {

@@ -50,22 +50,19 @@ func BenchmarkMarshalManual(b *testing.B) {
 
 	b.ReportAllocs()
 
+	buf := make([]byte, 0, 1024)
+
 	for b.Loop() {
 		builder.Reset()
 
 		// Keys must be added in sorted order
 		builder.AddInt64(keyID, benchUser.ID)
 		builder.AddBool(keyIsActive, benchUser.IsActive)
-		builder.AddString(keyName, []byte(benchUser.Name))
-
-		rolesBytes := make([][]byte, len(benchUser.Roles))
-		for j, r := range benchUser.Roles {
-			rolesBytes[j] = []byte(r)
-		}
-		builder.AddStringArray(keyRoles, rolesBytes)
+		builder.AddStringString(keyName, benchUser.Name)
+		builder.AddStringStringArray(keyRoles, benchUser.Roles)
 		builder.AddFloat64(keyScore, benchUser.Score)
 
-		benchData, err = builder.Build(nil)
+		benchData, err = builder.Build(buf)
 		if err != nil {
 			b.Fatal(err)
 		}

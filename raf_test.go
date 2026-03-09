@@ -419,3 +419,117 @@ func TestMapType(t *testing.T) {
 		t.Errorf("Plain value: ok=%v vt=%d val=%q", ok, val.Type, val.String())
 	}
 }
+
+func TestValueBytes(t *testing.T) {
+	b := NewBuilder()
+	b.AddStringString([]byte("my_str"), "hello bytes")
+
+	valBuf := make([]byte, 0, 32)
+	dst, _ := b.Build(nil)
+	block := Block(dst)
+
+	val, ok := block.Get([]byte("my_str"))
+	if !ok {
+		t.Fatal("Failed to get my_str")
+	}
+
+	// Test Value.Bytes
+	bStr := val.Bytes(valBuf)
+	if string(bStr) != "hello bytes" {
+		t.Errorf("Expected 'hello bytes', got %q", bStr)
+	}
+
+	// Test Value.Bytes on wrong type
+	b.Reset()
+	b.AddInt64([]byte("my_int"), 123)
+	dst, _ = b.Build(nil)
+	block = Block(dst)
+	val, _ = block.Get([]byte("my_int"))
+	if val.Bytes(valBuf) != nil {
+		t.Error("Expected nil when calling Bytes on non-string value")
+	}
+}
+
+func TestArrayAtHelpers(t *testing.T) {
+	b := NewBuilder()
+
+	err := b.AddBoolArray([]byte("a_bool"), []bool{true, false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = b.AddFloat64Array([]byte("b_float"), []float64{1.1, 2.2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = b.AddInt64Array([]byte("c_int"), []int64{10, 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Use the new AddStringStringArray helper
+	err = b.AddStringStringArray([]byte("d_str"), []string{"a", "b", "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dst, err := b.Build(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := Block(dst)
+
+	valBuf := make([]byte, 0, 16)
+
+	// Bool array helper
+	arrVal, ok := block.Get([]byte("a_bool"))
+	if !ok {
+		t.Fatal("missing a_bool")
+	}
+	arr := arrVal.Array()
+	if arr.AtBool(0) != true || arr.AtBool(1) != false {
+		t.Errorf("AtBool expected true, false. got %v, %v", arr.AtBool(0), arr.AtBool(1))
+	}
+	// wrong type fallbacks
+	if arr.AtString(0, valBuf) != nil {
+		t.Errorf("AtString on Bool array should return nil")
+	}
+	if arr.AtBool(0) != false {
+		t.Errorf("AtBool on Float64 array should return false")
+	}
+	if arr.AtFloat64(0) != 0 {
+		t.Errorf("AtFloat64 on Int64 array should return 0")
+	}
+	if arr.AtInt64(0) != 0 {
+		t.Errorf("AtInt64 on String array should return 0")
+	}
+
+	// Float64 array helper
+	arrVal, ok = block.Get([]byte("b_float"))
+	if !ok {
+		t.Fatal("missing b_float")
+	}
+	arr = arrVal.Array()
+	if arr.AtFloat64(0) != 1.1 {
+		t.Errorf("AtFloat64(0) expected 1.1, got %f", arr.AtFloat64(0))
+	}
+
+	// Int64 array helper
+	arrVal, ok = block.Get([]byte("c_int"))
+	if !ok {
+		t.Fatal("missing c_int")
+	}
+	arr = arrVal.Array()
+	if arr.AtInt64(1) != 20 {
+		t.Errorf("AtInt64(1) expected 20, got %d", arr.AtInt64(1))
+	}
+
+	// String array helper
+	arrVal, ok = block.Get([]byte("d_str"))
+	if !ok {
+		t.Fatal("missing d_str")
+	}
+	arr = arrVal.Array()
+	if string(arr.AtString(0, valBuf)) != "a" {
+		t.Errorf("AtString(0) expected 'a', got %q", arr.AtString(0, valBuf))
+	}
+}

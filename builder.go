@@ -135,6 +135,21 @@ func (b *Builder) AddString(key, val []byte) error {
 	return nil
 }
 
+// AddStringString is a helper for adding string values without
+// unnecessary byte slice conversions.
+func (b *Builder) AddStringString(key []byte, val string) error {
+	if err := b.checkKey(key); err != nil {
+		return err
+	}
+	b.appendKey(key)
+
+	b.vals = append(b.vals, val...)
+	b.valOffsets = append(b.valOffsets, uint16(len(b.vals)))
+	b.types = append(b.types, byte(TypeString))
+
+	return nil
+}
+
 func (b *Builder) AddInt64(key []byte, val int64) error {
 	if err := b.checkKey(key); err != nil {
 		return err
@@ -208,36 +223,13 @@ func (b *Builder) appendArrayHeader(elemType Type, count int) {
 }
 
 func (b *Builder) AddStringArray(key []byte, vals [][]byte) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
+	return addStringArray(b, key, vals)
+}
 
-	// Header: type + count
-	b.appendArrayHeader(TypeString, len(vals))
-
-	// Offset table: (N+1) u16 values
-	// First pass: compute offsets and append placeholders
-	offsetStart := len(b.arrayBuf)
-	for range len(vals) + 1 {
-		b.arrayBuf = append(b.arrayBuf, 0, 0)
-	}
-
-	// Second pass: write values and fill offsets
-	var off uint16
-	var buf [2]byte
-	for i, v := range vals {
-		binary.BigEndian.PutUint16(buf[:], off)
-		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
-		b.arrayBuf = append(b.arrayBuf, v...)
-		off += uint16(len(v))
-	}
-	// Final sentinel offset
-	binary.BigEndian.PutUint16(buf[:], off)
-	copy(b.arrayBuf[offsetStart+len(vals)*2:], buf[:])
-
-	b.appendValue(TypeArray, b.arrayBuf)
-	return nil
+// AddStringStringArray is a helper for adding arrays of strings without
+// unnecessary byte slice conversions.
+func (b *Builder) AddStringStringArray(key []byte, vals []string) error {
+	return addStringArray(b, key, vals)
 }
 
 func (b *Builder) AddInt64Array(key []byte, vals []int64) error {
@@ -372,4 +364,37 @@ func (b *Builder) Build(dst []byte) ([]byte, error) {
 	copy(dst[cursor:], b.vals)
 
 	return dst, nil
+}
+
+func addStringArray[T interface{ string | []byte }](b *Builder, key []byte, vals []T) error {
+	if err := b.checkKey(key); err != nil {
+		return err
+	}
+	b.appendKey(key)
+
+	// Header: type + count
+	b.appendArrayHeader(TypeString, len(vals))
+
+	// Offset table: (N+1) u16 values
+	// First pass: compute offsets and append placeholders
+	offsetStart := len(b.arrayBuf)
+	for range len(vals) + 1 {
+		b.arrayBuf = append(b.arrayBuf, 0, 0)
+	}
+
+	// Second pass: write values and fill offsets
+	var off uint16
+	var buf [2]byte
+	for i, v := range vals {
+		binary.BigEndian.PutUint16(buf[:], off)
+		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
+		b.arrayBuf = append(b.arrayBuf, v...)
+		off += uint16(len(v))
+	}
+	// Final sentinel offset
+	binary.BigEndian.PutUint16(buf[:], off)
+	copy(b.arrayBuf[offsetStart+len(vals)*2:], buf[:])
+
+	b.appendValue(TypeArray, b.arrayBuf)
+	return nil
 }

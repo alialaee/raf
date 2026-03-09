@@ -3,6 +3,7 @@ package raf
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 )
 
 // Block is a zero-allocation reader for a RAF formatted byte slice.
@@ -148,4 +149,32 @@ func (a Array) At(i int) []byte {
 	elemSize := elemType.Size()
 	start := 3 + i*elemSize
 	return a[start : start+elemSize]
+}
+
+func (a Array) AtString(i int, buf []byte) []byte {
+	if a.ElemType() != TypeString {
+		return nil
+	}
+	return append(buf[0:0], a.At(i)...)
+}
+
+func (a Array) AtInt64(i int) int64 {
+	if a.ElemType() != TypeInt64 {
+		return 0
+	}
+	return int64(binary.BigEndian.Uint64(a.At(i)))
+}
+
+func (a Array) AtFloat64(i int) float64 {
+	if a.ElemType() != TypeFloat64 {
+		return 0
+	}
+	return math.Float64frombits(binary.BigEndian.Uint64(a.At(i)))
+}
+
+func (a Array) AtBool(i int) bool {
+	if a.ElemType() != TypeBool {
+		return false
+	}
+	return a.At(i)[0] != 0
 }
