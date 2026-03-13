@@ -47,6 +47,34 @@ While `raf` is type-rich and flexible like JSON, it has two key structural diffe
 
 For details on the exact binary layout, see [`raf.go`](raf.go).
 
+## Benchmarking
+
+See the [benchmark](benchmark) directory for performance comparisons against a few reflection-based encoders/decoders.
+
+Here's a summary of the results on my machine (Apple MacBook Air M4):
+
+```
+goos: darwin
+goarch: arm64
+pkg: github.com/alialaee/raf/benchmark
+cpu: Apple M4
+BenchmarkRAF_Marshal-10          	  797121	      1501 ns/op	    1343 B/op	       1 allocs/op
+BenchmarkMsgPack_Marshal-10      	  633410	      1891 ns/op	    2327 B/op	       6 allocs/op
+BenchmarkJSON_Marshal-10         	  889039	      1343 ns/op	    1355 B/op	       2 allocs/op
+BenchmarkCBOR_Marshal-10         	 1000000	      1166 ns/op	    1046 B/op	       2 allocs/op
+BenchmarkBSON_Marshal-10         	  428827	      2793 ns/op	    1393 B/op	       2 allocs/op
+
+BenchmarkRAF_Lookup_Name-10      	74148638	        16.07 ns/op	       0 B/op	       0 allocs/op
+
+BenchmarkRAF_Unmarshal-10        	  728324	      1614 ns/op	     913 B/op	      25 allocs/op
+BenchmarkJSON_Unmarshal-10       	  149156	      8068 ns/op	    1744 B/op	      35 allocs/op
+BenchmarkMsgPack_Unmarshal-10    	  381302	      3200 ns/op	    1290 B/op	      28 allocs/op
+BenchmarkCBOR_Unmarshal-10       	  352110	      3413 ns/op	     914 B/op	      25 allocs/op
+BenchmarkBSON_Unmarshal-10       	  196692	      6094 ns/op	    2839 B/op	     154 allocs/op
+```
+
+As you can see, `raf` marshaler needs some optimizations, but it's already very competitive. The unmarshaler is the fastest, and the lookup performance is excellent, with zero allocations.
+
 ## Example Usage
 
 It's possible to use Marshaling and Unmarshaling for general cases, but for higher performance use-cases, it's recommended to use `Builder` and `Block` directly.
