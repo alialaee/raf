@@ -178,3 +178,10 @@ func (a Array) AtBool(i int) bool {
 	}
 	return a.At(i)[0] != 0
 }
+
+func (a Array) AtMap(i int) Block {
+	if a.ElemType() != TypeMap {
+		return nil
+	}
+	return Block(a.At(i))
+}

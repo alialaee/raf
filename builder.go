@@ -57,8 +57,10 @@ type Builder struct {
 	valOffsets []uint16 // Starts with 0
 	types      []byte
 
-	lastKey  []byte // Tracked to ensure keys are added in sorted order
-	arrayBuf []byte // Scratch buffer reused for array value serialization
+	lastKey       []byte   // Tracked to ensure keys are added in sorted order
+	arrayBuf      []byte   // Scratch buffer reused for array value serialization
+	inner         *Builder // Reusable inner builder for nested map and struct encoding
+	innerBuildBuf []byte   // Scratch buffer for inner.Build output and it's preserved across Reset
 }
 
 func NewBuilder() *Builder {
@@ -213,6 +215,73 @@ func (b *Builder) AddMap(key []byte, val []byte) error {
 	return nil
 }
 
+// AddMapFn writes a nested map/struct value by calling fn with a reusable inner Builder.
+// The inner Builder is reset before fn is called and must not be retained after fn returns.
+// After warmup, this method incurs zero allocations.
+func (b *Builder) AddMapFn(key []byte, fn func(inner *Builder) error) error {
+	if err := b.checkKey(key); err != nil {
+		return err
+	}
+	b.appendKey(key)
+	if b.inner == nil {
+		b.inner = &Builder{}
+	}
+	b.inner.Reset()
+	if err := fn(b.inner); err != nil {
+		return err
+	}
+	var err error
+	b.innerBuildBuf, err = b.inner.Build(b.innerBuildBuf)
+	if err != nil {
+		return err
+	}
+	b.appendValue(TypeMap, b.innerBuildBuf)
+	return nil
+}
+
+// addMapArrayFromFn writes a TypeArray(TypeMap) value where each element is built by fn.
+// fn is called once per element; its inner Builder is reset between calls.
+// A single inner Builder is reused for all elements, avoiding per-element allocations.
+func (b *Builder) addMapArrayFromFn(key []byte, count int, fn func(i int, inner *Builder) error) error {
+	if err := b.checkKey(key); err != nil {
+		return err
+	}
+	b.appendKey(key)
+	if b.inner == nil {
+		b.inner = &Builder{}
+	}
+
+	b.appendArrayHeader(TypeMap, count)
+
+	offsetStart := len(b.arrayBuf)
+	for range count + 1 {
+		b.arrayBuf = append(b.arrayBuf, 0, 0)
+	}
+
+	var off uint16
+	var buf [2]byte
+	for i := range count {
+		b.inner.Reset()
+		if err := fn(i, b.inner); err != nil {
+			return err
+		}
+		var err error
+		b.innerBuildBuf, err = b.inner.Build(b.innerBuildBuf)
+		if err != nil {
+			return err
+		}
+		binary.BigEndian.PutUint16(buf[:], off)
+		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
+		b.arrayBuf = append(b.arrayBuf, b.innerBuildBuf...)
+		off += uint16(len(b.innerBuildBuf))
+	}
+	binary.BigEndian.PutUint16(buf[:], off)
+	copy(b.arrayBuf[offsetStart+count*2:], buf[:])
+
+	b.appendValue(TypeArray, b.arrayBuf)
+	return nil
+}
+
 // appendArrayHeader writes the element type (u8) + count (u16) to arrayBuf.
 func (b *Builder) appendArrayHeader(elemType Type, count int) {
 	b.arrayBuf = b.arrayBuf[:0]
@@ -283,6 +352,38 @@ func (b *Builder) AddBoolArray(key []byte, vals []bool) error {
 			b.arrayBuf = append(b.arrayBuf, 0x00)
 		}
 	}
+
+	b.appendValue(TypeArray, b.arrayBuf)
+	return nil
+}
+
+// AddMapArray adds an array of pre-built map blocks.
+// Each element of vals must be a valid RAF block (from Builder.Build).
+func (b *Builder) AddMapArray(key []byte, vals [][]byte) error {
+	if err := b.checkKey(key); err != nil {
+		return err
+	}
+	b.appendKey(key)
+
+	b.appendArrayHeader(TypeMap, len(vals))
+
+	// Offset table: (N+1) u16 values
+	offsetStart := len(b.arrayBuf)
+	for range len(vals) + 1 {
+		b.arrayBuf = append(b.arrayBuf, 0, 0)
+	}
+
+	var off uint16
+	var buf [2]byte
+	for i, v := range vals {
+		binary.BigEndian.PutUint16(buf[:], off)
+		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
+		b.arrayBuf = append(b.arrayBuf, v...)
+		off += uint16(len(v))
+	}
+	// Final sentinel offset
+	binary.BigEndian.PutUint16(buf[:], off)
+	copy(b.arrayBuf[offsetStart+len(vals)*2:], buf[:])
 
 	b.appendValue(TypeArray, b.arrayBuf)
 	return nil

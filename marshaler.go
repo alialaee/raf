@@ -111,15 +111,9 @@ func (m *Marshaler) marshalToBuilder(builder *Builder, rv reflect.Value, key []b
 		if rv.Kind() == reflect.Map && rv.IsNil() {
 			return builder.AddNull(key)
 		}
-		innerBuilder := NewBuilder()
-		if err := m.marshalMapOrStruct(innerBuilder, rv); err != nil {
-			return err
-		}
-		innerBytes, err := innerBuilder.Build(nil)
-		if err != nil {
-			return err
-		}
-		return builder.AddMap(key, innerBytes)
+		return builder.AddMapFn(key, func(inner *Builder) error {
+			return m.marshalMapOrStruct(inner, rv)
+		})
 	case reflect.Slice, reflect.Array:
 		if rv.Kind() == reflect.Slice && rv.IsNil() {
 			return builder.AddNull(key)
@@ -127,7 +121,7 @@ func (m *Marshaler) marshalToBuilder(builder *Builder, rv reflect.Value, key []b
 		if rv.Type().Elem().Kind() == reflect.Uint8 {
 			return builder.AddString(key, rv.Bytes())
 		}
-		return marshalArray(builder, rv, key)
+		return m.marshalArray(builder, rv, key)
 	default:
 		return fmt.Errorf("raf: unsupported type %s", rv.Type().String())
 	}
@@ -185,7 +179,7 @@ func fieldName(f reflect.StructField) (skip bool, name string) {
 	return false, name
 }
 
-func marshalArray(builder *Builder, rv reflect.Value, key []byte) error {
+func (m *Marshaler) marshalArray(builder *Builder, rv reflect.Value, key []byte) error {
 	if rv.Len() == 0 {
 		return builder.AddStringArray(key, nil)
 	}
@@ -223,6 +217,10 @@ func marshalArray(builder *Builder, rv reflect.Value, key []byte) error {
 			vals[i] = indirect(rv.Index(i)).Bool()
 		}
 		return builder.AddBoolArray(key, vals)
+	case reflect.Map, reflect.Struct:
+		return builder.addMapArrayFromFn(key, rv.Len(), func(i int, inner *Builder) error {
+			return m.marshalMapOrStruct(inner, indirect(rv.Index(i)))
+		})
 	}
 	return fmt.Errorf("raf: unsupported array element type %s", elemType.String())
 }
