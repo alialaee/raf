@@ -80,8 +80,16 @@ type unmarshalOP struct {
 	fieldType  reflect.Type
 	targetType reflect.Type
 	targetKind reflect.Kind
-	rafName    []byte
-	nested     []unmarshalOP
+
+	// If the field is a slice
+	elemKind reflect.Kind
+	elemSize uintptr
+
+	// If the field is a struct or a slice of structs, nested contains
+	// the ops for the nested struct(s)
+	nested []unmarshalOP
+
+	rafName []byte
 }
 
 func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
@@ -96,7 +104,7 @@ func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
 	}
 
 	typeOf := valueOf.Type().Elem()
-	return u.unmarshalWithOps(
+	return u.unmarshal(
 		u.loadOPs(typeOf),
 		block,
 		unsafe.Pointer(valueOf.Pointer()),
@@ -106,7 +114,6 @@ func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
 func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
 	ops := make([]unmarshalOP, 0, typ.NumField())
 	for field := range typ.Fields() {
-		field := field
 		fieldRafName, skip := fieldName(field)
 		if skip {
 			continue
@@ -128,8 +135,16 @@ func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
 			rafName:    []byte(fieldRafName),
 		})
 
-		if targetKind == reflect.Struct {
+		switch targetKind {
+		case reflect.Struct:
 			ops[len(ops)-1].nested = u.compileOPs(targetType)
+		case reflect.Slice:
+			elemType := targetType.Elem()
+			ops[len(ops)-1].elemKind = elemType.Kind()
+			ops[len(ops)-1].elemSize = elemType.Size()
+			if elemType.Kind() == reflect.Struct {
+				ops[len(ops)-1].nested = u.compileOPs(elemType)
+			}
 		}
 	}
 
@@ -148,12 +163,7 @@ func typeCompatible(valType raf.Type, targetKind reflect.Kind) bool {
 	case raf.TypeString:
 		return targetKind == reflect.String
 	case raf.TypeInt64:
-		if targetKind != reflect.Int && targetKind != reflect.Int8 && targetKind != reflect.Int16 && targetKind != reflect.Int32 && targetKind != reflect.Int64 &&
-			targetKind != reflect.Uint && targetKind != reflect.Uint8 && targetKind != reflect.Uint16 && targetKind != reflect.Uint32 && targetKind != reflect.Uint64 &&
-			targetKind != reflect.Float32 && targetKind != reflect.Float64 {
-			return false
-		}
-		return true
+		return targetKind >= reflect.Int && targetKind <= reflect.Uint64
 	case raf.TypeFloat64:
 		return targetKind == reflect.Float32 || targetKind == reflect.Float64
 	case raf.TypeBool:
@@ -167,7 +177,7 @@ func typeCompatible(valType raf.Type, targetKind reflect.Kind) bool {
 	}
 }
 
-func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base unsafe.Pointer) error {
+func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data raf.Block, base unsafe.Pointer) error {
 	for dataI, opsI := 0, 0; dataI < data.NumPairs() && opsI < len(ops); {
 		op := ops[opsI]
 		cmp := bytes.Compare(data.KeyAt(dataI), op.rafName)
@@ -232,13 +242,64 @@ func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base u
 		case reflect.String:
 			*(*string)(fieldPtr) = val.String()
 		case reflect.Struct:
-			if err := u.unmarshalWithOps(op.nested, val.Map(), fieldPtr); err != nil {
+			if err := u.unmarshal(op.nested, val.Map(), fieldPtr); err != nil {
 				return err
 			}
 		case reflect.Slice:
-			fieldValue := reflect.NewAt(op.fieldType, fieldPtr).Elem()
-			if err := u.unmarshalValueInto(fieldValue, val); err != nil {
-				return newErrTypeMismatch(string(op.rafName), val.Type, targetKind).WithWrap(err)
+			if val.IsNull() {
+				reflect.NewAt(op.targetType, fieldPtr).Elem().SetZero()
+				break
+			}
+			arr := val.Array()
+			fieldValue := reflect.NewAt(op.targetType, fieldPtr).Elem()
+			arrLen := arr.Len()
+			if fieldValue.IsNil() || fieldValue.Cap() < arrLen {
+				fieldValue.Set(reflect.MakeSlice(op.targetType, arrLen, arrLen))
+			} else {
+				fieldValue.SetLen(arrLen)
+			}
+			if arrLen == 0 {
+				break
+			}
+			sliceBase := unsafe.Pointer(fieldValue.Pointer())
+			for i := range arrLen {
+				elemPtr := unsafe.Add(sliceBase, uintptr(i)*op.elemSize)
+				switch op.elemKind {
+				case reflect.Int:
+					*(*int)(elemPtr) = int(arr.AtInt64(i))
+				case reflect.Int8:
+					*(*int8)(elemPtr) = int8(arr.AtInt64(i))
+				case reflect.Int16:
+					*(*int16)(elemPtr) = int16(arr.AtInt64(i))
+				case reflect.Int32:
+					*(*int32)(elemPtr) = int32(arr.AtInt64(i))
+				case reflect.Int64:
+					*(*int64)(elemPtr) = arr.AtInt64(i)
+				case reflect.Uint:
+					*(*uint)(elemPtr) = uint(arr.AtInt64(i))
+				case reflect.Uint8:
+					*(*uint8)(elemPtr) = uint8(arr.AtInt64(i))
+				case reflect.Uint16:
+					*(*uint16)(elemPtr) = uint16(arr.AtInt64(i))
+				case reflect.Uint32:
+					*(*uint32)(elemPtr) = uint32(arr.AtInt64(i))
+				case reflect.Uint64:
+					*(*uint64)(elemPtr) = uint64(arr.AtInt64(i))
+				case reflect.Float32:
+					*(*float32)(elemPtr) = float32(arr.AtFloat64(i))
+				case reflect.Float64:
+					*(*float64)(elemPtr) = arr.AtFloat64(i)
+				case reflect.Bool:
+					*(*bool)(elemPtr) = arr.AtBool(i)
+				case reflect.String:
+					*(*string)(elemPtr) = string(arr.At(i))
+				case reflect.Struct:
+					if err := u.unmarshal(op.nested, raf.NewBlock(arr.At(i)), elemPtr); err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unsupported slice element kind: %s", op.elemKind)
+				}
 			}
 		default:
 			return fmt.Errorf("%w: unsupported target kind %s", newErrTypeMismatch(string(op.rafName), val.Type, targetKind), targetKind)
@@ -248,84 +309,6 @@ func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base u
 		dataI++
 	}
 	return nil
-}
-
-func (u *Unmarshaler) unmarshalValueInto(dst reflect.Value, val raf.Value) error {
-	if dst.Kind() == reflect.Pointer {
-		if val.IsNull() {
-			dst.SetZero()
-			return nil
-		}
-		if dst.IsNil() {
-			dst.Set(reflect.New(dst.Type().Elem()))
-		}
-		return u.unmarshalValueInto(dst.Elem(), val)
-	}
-
-	if val.IsNull() {
-		dst.SetZero()
-		return nil
-	}
-
-	switch val.Type {
-	case raf.TypeString:
-		if dst.Kind() != reflect.String {
-			return fmt.Errorf("cannot unmarshal string into %s", dst.Type())
-		}
-		dst.SetString(val.String())
-		return nil
-	case raf.TypeInt64:
-		switch dst.Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			dst.SetInt(val.Int64())
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			dst.SetUint(uint64(val.Int64()))
-		case reflect.Float32, reflect.Float64:
-			dst.SetFloat(float64(val.Int64()))
-		default:
-			return fmt.Errorf("cannot unmarshal int64 into %s", dst.Type())
-		}
-		return nil
-	case raf.TypeFloat64:
-		switch dst.Kind() {
-		case reflect.Float32, reflect.Float64:
-			dst.SetFloat(val.Float64())
-		default:
-			return fmt.Errorf("cannot unmarshal float64 into %s", dst.Type())
-		}
-		return nil
-	case raf.TypeBool:
-		if dst.Kind() != reflect.Bool {
-			return fmt.Errorf("cannot unmarshal bool into %s", dst.Type())
-		}
-		dst.SetBool(val.Bool())
-		return nil
-	case raf.TypeMap:
-		if dst.Kind() != reflect.Struct {
-			return fmt.Errorf("cannot unmarshal map into %s", dst.Type())
-		}
-		ops := u.loadOPs(dst.Type())
-		return u.unmarshalWithOps(ops, val.Map(), unsafe.Pointer(dst.Addr().Pointer()))
-	case raf.TypeArray:
-		if dst.Kind() != reflect.Slice {
-			return fmt.Errorf("cannot unmarshal array into %s", dst.Type())
-		}
-		arr := val.Array()
-		if dst.IsNil() || dst.Cap() < arr.Len() {
-			dst.Set(reflect.MakeSlice(dst.Type(), arr.Len(), arr.Len()))
-		} else {
-			dst.SetLen(arr.Len()) // TODO: consider removing this. Let's always allocate.
-		}
-		for i := 0; i < arr.Len(); i++ {
-			elemVal := raf.Value{Type: arr.ElemType(), Data: arr.At(i)}
-			if err := u.unmarshalValueInto(dst.Index(i), elemVal); err != nil {
-				return fmt.Errorf("index %d: %w", i, err)
-			}
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported value type %s", val.Type)
-	}
 }
 
 func (u *Unmarshaler) loadOPs(typ reflect.Type) []unmarshalOP {
