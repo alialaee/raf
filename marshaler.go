@@ -205,6 +205,12 @@ func (m *Marshaler) marshalArray(builder *Builder, rv reflect.Value, key []byte)
 			vals[i] = indirect(rv.Index(i)).Int()
 		}
 		return builder.AddInt64Array(key, vals)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		vals := make([]int64, rv.Len())
+		for i := range rv.Len() {
+			vals[i] = int64(indirect(rv.Index(i)).Uint())
+		}
+		return builder.AddInt64Array(key, vals)
 	case reflect.Float32, reflect.Float64:
 		vals := make([]float64, rv.Len())
 		for i := range rv.Len() {

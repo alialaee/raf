@@ -12,6 +12,12 @@ import (
 	"github.com/alialaee/raf"
 )
 
+var defaultUnmarshaler = NewUnmarshaler()
+
+func Unmarshal(data []byte, v any) error {
+	return defaultUnmarshaler.Unmarshal(data, v)
+}
+
 type TypeMismatchError struct {
 	Key          string
 	ExpectedType raf.Type
