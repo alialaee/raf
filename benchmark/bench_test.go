@@ -93,7 +93,7 @@ func BenchmarkRAF_Lookup_Name(b *testing.B) {
 
 	b.ResetTimer()
 	for i := range b.N {
-		_, found := raf.Block(marshaledPlayers[i%len(players)]).Get([]byte("name"))
+		_, found := raf.NewBlock(marshaledPlayers[i%len(players)]).Get([]byte("name"))
 		if !found {
 			b.Fatal("key not found")
 		}

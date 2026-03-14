@@ -10,6 +10,10 @@ import (
 // It is unsafe to use if Valid() returns false.
 type Block []byte
 
+func NewBlock(data []byte) Block {
+	return Block(data)
+}
+
 // Valid does *NOT* thoroughly validate as it written to be
 // fast.
 func (b Block) Valid() bool {

@@ -57,7 +57,7 @@ func TestBuilderAndBlockBasic(t *testing.T) {
 	}
 
 	// Verify Decoder Block
-	block := Block(dst)
+	block := NewBlock(dst)
 	if !block.Valid() {
 		t.Fatal("Block should be valid")
 	}
@@ -221,7 +221,7 @@ func TestArrayTypes(t *testing.T) {
 		t.Fatalf("Estimated size %d != built size %d", est, len(dst))
 	}
 
-	block := Block(dst)
+	block := NewBlock(dst)
 	if !block.Valid() {
 		t.Fatal("Block should be valid")
 	}
@@ -351,7 +351,7 @@ func TestMapType(t *testing.T) {
 		t.Fatalf("Estimated size %d != built size %d", est, len(dst))
 	}
 
-	block := Block(dst)
+	block := NewBlock(dst)
 	if !block.Valid() {
 		t.Fatal("Outer block should be valid")
 	}
@@ -426,7 +426,7 @@ func TestValueBytes(t *testing.T) {
 
 	valBuf := make([]byte, 0, 32)
 	dst, _ := b.Build(nil)
-	block := Block(dst)
+	block := NewBlock(dst)
 
 	val, ok := block.Get([]byte("my_str"))
 	if !ok {
@@ -443,7 +443,7 @@ func TestValueBytes(t *testing.T) {
 	b.Reset()
 	b.AddInt64([]byte("my_int"), 123)
 	dst, _ = b.Build(nil)
-	block = Block(dst)
+	block = NewBlock(dst)
 	val, _ = block.Get([]byte("my_int"))
 	if val.Bytes(valBuf) != nil {
 		t.Error("Expected nil when calling Bytes on non-string value")
@@ -476,7 +476,7 @@ func TestArrayAtHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	block := Block(dst)
+	block := NewBlock(dst)
 
 	valBuf := make([]byte, 0, 16)
 

@@ -49,7 +49,7 @@ func BenchmarkBlockGet(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	block := Block(dst)
+	block := NewBlock(dst)
 	searchKey := []byte{25, 'k', 'e', 'y'}
 
 	b.ReportAllocs()
@@ -74,7 +74,7 @@ func BenchmarkLookup(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	block := Block(dst)
+	block := NewBlock(dst)
 	searchKey := []byte("score")
 
 	b.ReportAllocs()
@@ -209,7 +209,7 @@ func BenchmarkArrayRead(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	block := Block(dst)
+	block := NewBlock(dst)
 	searchKey := []byte("a_ints")
 
 	b.ReportAllocs()
@@ -271,7 +271,7 @@ func BenchmarkMapRead(b *testing.B) {
 	outer.AddFloat64([]byte("score"), 99.5)
 	outerDst, _ := outer.Build(nil)
 
-	block := Block(outerDst)
+	block := NewBlock(outerDst)
 	metaKey := []byte("meta")
 	nameKey := []byte("name")
 

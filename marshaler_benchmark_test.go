@@ -103,7 +103,7 @@ func BenchmarkUnmarshalManual(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		var u BenchUser
-		block := Block(data)
+		block := NewBlock(data)
 		if !block.Valid() {
 			b.Fatal("invalid block")
 		}

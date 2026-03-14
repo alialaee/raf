@@ -258,7 +258,7 @@ func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
 	}
 	rv = rv.Elem()
 
-	block := Block(data)
+	block := NewBlock(data)
 	if !block.Valid() {
 		return errors.New("raf: invalid block structure")
 	}

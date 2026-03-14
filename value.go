@@ -59,7 +59,7 @@ func (v Value) Map() Block {
 	if v.Type != TypeMap {
 		return nil
 	}
-	return Block(v.Data)
+	return NewBlock(v.Data)
 }
 
 func (v Value) IsNull() bool {
