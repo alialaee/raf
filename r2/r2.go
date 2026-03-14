@@ -2,6 +2,7 @@ package r2
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -10,6 +11,46 @@ import (
 
 	"github.com/alialaee/raf"
 )
+
+type TypeMismatchError struct {
+	Key          string
+	ExpectedType raf.Type
+	ActualType   raf.Type
+	Inner        error
+}
+
+func (e *TypeMismatchError) Error() string {
+	return fmt.Sprintf("type mismatch for key %s: expected %d, got %d", e.Key, e.ExpectedType, e.ActualType)
+}
+
+func (e *TypeMismatchError) Unwrap() error {
+	return e.Inner
+}
+
+func (e *TypeMismatchError) WithWrap(err error) error {
+	e.Inner = err
+	return e
+}
+
+func (e *TypeMismatchError) Is(target error) bool {
+	if e.Inner != nil && errors.Is(e.Inner, target) {
+		return true
+	}
+
+	t, ok := target.(*TypeMismatchError)
+	if !ok {
+		return false
+	}
+	return e.Key == t.Key && e.ExpectedType == t.ExpectedType && e.ActualType == t.ActualType
+}
+
+func newTypeMismatchError(key string, expected raf.Type, actual raf.Type) *TypeMismatchError {
+	return &TypeMismatchError{
+		Key:          key,
+		ExpectedType: expected,
+		ActualType:   actual,
+	}
+}
 
 type Unmarshaler struct {
 	opsCache sync.Map
@@ -130,7 +171,7 @@ func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base u
 		}
 
 		if !typeCompatible(val.Type, targetKind) {
-			return fmt.Errorf("type mismatch for key %s", op.rafName)
+			return newTypeMismatchError(string(op.rafName), val.Type, raf.Type(targetKind))
 		}
 
 		switch targetKind {
@@ -169,10 +210,10 @@ func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base u
 		case reflect.Slice:
 			fieldValue := reflect.NewAt(op.fieldType, fieldPtr).Elem()
 			if err := u.unmarshalValueInto(fieldValue, val); err != nil {
-				return fmt.Errorf("type mismatch for key %s: %w", op.rafName, err)
+				return newTypeMismatchError(string(op.rafName), val.Type, raf.Type(targetKind)).WithWrap(err)
 			}
 		default:
-			return fmt.Errorf("unsupported target kind %s for key %s", targetKind, op.rafName)
+			return fmt.Errorf("%w: unsupported target kind %s", newTypeMismatchError(string(op.rafName), val.Type, raf.Type(targetKind)), targetKind)
 		}
 
 		opsI++
