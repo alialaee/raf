@@ -105,13 +105,15 @@ func BenchmarkJSONUnmarshal(b *testing.B) {
 }
 
 func testUnmarshal[T any, V any](t *testing.T, given T, expected V) {
+	t.Helper()
+
 	data, err := raf.Marshal(given)
 	if err != nil {
 		t.Fatalf("failed to marshal: %v", err)
 	}
 
 	var got V
-	if err := raf.Unmarshal(data, &got); err != nil {
+	if err := Unmarshal(data, &got); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
@@ -121,13 +123,15 @@ func testUnmarshal[T any, V any](t *testing.T, given T, expected V) {
 }
 
 func testUnmarshalSame[T any](t *testing.T, v T) {
+	t.Helper()
+
 	data, err := raf.Marshal(v)
 	if err != nil {
 		t.Fatalf("failed to marshal: %v", err)
 	}
 
 	var got T
-	if err := raf.Unmarshal(data, &got); err != nil {
+	if err := Unmarshal(data, &got); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 

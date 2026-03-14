@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -26,7 +27,10 @@ type TypeMismatchError struct {
 }
 
 func (e *TypeMismatchError) Error() string {
-	return fmt.Sprintf("type mismatch for key %s: expected %d, got %d", e.Key, e.ExpectedType, e.ActualType)
+	if e.Inner != nil {
+		return fmt.Sprintf("type mismatch for key %s: expected %s, got %s: %v", e.Key, e.ExpectedType, e.ActualType, e.Inner)
+	}
+	return fmt.Sprintf("type mismatch for key %s: expected %s, got %s", e.Key, e.ExpectedType, e.ActualType)
 }
 
 func (e *TypeMismatchError) Unwrap() error {
@@ -83,24 +87,22 @@ func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
 	}
 
 	typeOf := valueOf.Type().Elem()
-
-	ops, ok := u.opsCache.Load(typeOf)
-	if !ok {
-		ops = u.compileOPs(typeOf)
-		u.opsCache.Store(typeOf, ops)
-	}
-
 	return u.unmarshalWithOps(
-		ops.([]unmarshalOP),
+		u.loadOPs(typeOf),
 		raf.NewBlock(data),
 		unsafe.Pointer(valueOf.Pointer()),
 	)
 }
 
 func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
-	ops := make([]unmarshalOP, typ.NumField())
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
+	ops := make([]unmarshalOP, 0, typ.NumField())
+	for field := range typ.Fields() {
+		field := field
+		fieldRafName, skip := fieldName(field)
+		if skip {
+			continue
+		}
+
 		targetType := field.Type
 		targetKind := field.Type.Kind()
 		if targetKind == reflect.Pointer {
@@ -108,17 +110,17 @@ func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
 			targetKind = targetType.Kind()
 		}
 
-		ops[i] = unmarshalOP{
+		ops = append(ops, unmarshalOP{
 			offset:     int(field.Offset),
 			kind:       field.Type.Kind(),
 			fieldType:  field.Type,
 			targetType: targetType,
 			targetKind: targetKind,
-			rafName:    []byte(field.Tag.Get("raf")),
-		}
+			rafName:    []byte(fieldRafName),
+		})
 
 		if targetKind == reflect.Struct {
-			ops[i].nested = u.compileOPs(targetType)
+			ops[len(ops)-1].nested = u.compileOPs(targetType)
 		}
 	}
 
@@ -137,7 +139,12 @@ func typeCompatible(valType raf.Type, targetKind reflect.Kind) bool {
 	case raf.TypeString:
 		return targetKind == reflect.String
 	case raf.TypeInt64:
-		return targetKind >= reflect.Int && targetKind <= reflect.Uint64
+		if targetKind != reflect.Int && targetKind != reflect.Int8 && targetKind != reflect.Int16 && targetKind != reflect.Int32 && targetKind != reflect.Int64 &&
+			targetKind != reflect.Uint && targetKind != reflect.Uint8 && targetKind != reflect.Uint16 && targetKind != reflect.Uint32 && targetKind != reflect.Uint64 &&
+			targetKind != reflect.Float32 && targetKind != reflect.Float64 {
+			return false
+		}
+		return true
 	case raf.TypeFloat64:
 		return targetKind == reflect.Float32 || targetKind == reflect.Float64
 	case raf.TypeBool:
@@ -152,15 +159,20 @@ func typeCompatible(valType raf.Type, targetKind reflect.Kind) bool {
 }
 
 func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base unsafe.Pointer) error {
-	opsI := 0
-	for i := 0; i < data.NumPairs() && opsI < len(ops); i++ {
+	for dataI, opsI := 0, 0; dataI < data.NumPairs() && opsI < len(ops); {
 		op := ops[opsI]
-		if !bytes.Equal(data.KeyAt(i), op.rafName) {
+		cmp := bytes.Compare(data.KeyAt(dataI), op.rafName)
+		if cmp > 0 {
+			opsI++
+			continue
+		}
+		if cmp < 0 {
+			dataI++
 			continue
 		}
 
 		fieldPtr := unsafe.Add(base, op.offset)
-		val := data.ValueAt(i)
+		val := data.ValueAt(dataI)
 		targetKind := op.targetKind
 
 		if op.kind == reflect.Pointer {
@@ -168,6 +180,7 @@ func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base u
 			if val.IsNull() {
 				fieldValue.SetZero()
 				opsI++
+				dataI++
 				continue
 			}
 			if fieldValue.IsNil() {
@@ -223,6 +236,7 @@ func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base u
 		}
 
 		opsI++
+		dataI++
 	}
 	return nil
 }
@@ -281,12 +295,8 @@ func (u *Unmarshaler) unmarshalValueInto(dst reflect.Value, val raf.Value) error
 		if dst.Kind() != reflect.Struct {
 			return fmt.Errorf("cannot unmarshal map into %s", dst.Type())
 		}
-		ops, ok := u.opsCache.Load(dst.Type())
-		if !ok {
-			ops = u.compileOPs(dst.Type())
-			u.opsCache.Store(dst.Type(), ops)
-		}
-		return u.unmarshalWithOps(ops.([]unmarshalOP), val.Map(), unsafe.Pointer(dst.Addr().Pointer()))
+		ops := u.loadOPs(dst.Type())
+		return u.unmarshalWithOps(ops, val.Map(), unsafe.Pointer(dst.Addr().Pointer()))
 	case raf.TypeArray:
 		if dst.Kind() != reflect.Slice {
 			return fmt.Errorf("cannot unmarshal array into %s", dst.Type())
@@ -305,6 +315,30 @@ func (u *Unmarshaler) unmarshalValueInto(dst reflect.Value, val raf.Value) error
 		}
 		return nil
 	default:
-		return fmt.Errorf("unsupported value type %d", val.Type)
+		return fmt.Errorf("unsupported value type %s", val.Type)
 	}
+}
+
+func (u *Unmarshaler) loadOPs(typ reflect.Type) []unmarshalOP {
+	ops, ok := u.opsCache.Load(typ)
+	if !ok {
+		ops = u.compileOPs(typ)
+		u.opsCache.Store(typ, ops)
+	}
+	return ops.([]unmarshalOP)
+}
+
+func fieldName(f reflect.StructField) (name string, skip bool) {
+	tag := f.Tag.Get("raf")
+	if !f.IsExported() {
+		return "", true
+	}
+	if tag == "-" {
+		return "", true
+	}
+	name = tag
+	if name == "" {
+		name = strings.ToLower(f.Name)
+	}
+	return name, false
 }

@@ -118,9 +118,6 @@ func (m *Marshaler) marshalToBuilder(builder *Builder, rv reflect.Value, key []b
 		if rv.Kind() == reflect.Slice && rv.IsNil() {
 			return builder.AddNull(key)
 		}
-		if rv.Type().Elem().Kind() == reflect.Uint8 {
-			return builder.AddString(key, rv.Bytes())
-		}
 		return m.marshalArray(builder, rv, key)
 	default:
 		return fmt.Errorf("raf: unsupported type %s", rv.Type().String())
