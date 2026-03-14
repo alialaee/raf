@@ -164,6 +164,24 @@ type FullPrimitive struct {
 	EmptyPtr  *string `raf:"empty_ptr"`
 	EmptyInt  *int    `raf:"empty_int"`
 	EmptyBool *bool   `raf:"empty_bool"`
+
+	Ints    []int    `raf:"ints"`
+	Ints8   []int8   `raf:"ints8"`
+	Ints16  []int16  `raf:"ints16"`
+	Ints32  []int32  `raf:"ints32"`
+	Ints64  []int64  `raf:"ints64"`
+	Uints   []uint   `raf:"uints"`
+	Uints8  []uint8  `raf:"uints8"`
+	Uints16 []uint16 `raf:"uints16"`
+	Uints32 []uint32 `raf:"uints32"`
+	Uints64 []uint64 `raf:"uints64"`
+
+	Floats32 []float32 `raf:"floats32"`
+	Floats64 []float64 `raf:"floats64"`
+	Bools    []bool    `raf:"bools"`
+	// IntPointers []*int    `raf:"int_pointers"`
+
+	Strs []string `raf:"strings"`
 }
 
 func getFullPrimitive() FullPrimitive {
@@ -190,6 +208,24 @@ func getFullPrimitive() FullPrimitive {
 		EmptyPtr:  new(string("")),
 		EmptyInt:  new(int(0)),
 		EmptyBool: new(bool(false)),
+
+		Ints:   []int{-1, 0, 1},
+		Ints8:  []int8{-8, 0, 8},
+		Ints16: []int16{-16, 0, 16},
+		Ints32: []int32{-32, 0, 32},
+		Ints64: []int64{-64, 0, 64},
+
+		Uints:   []uint{123, 123, 5, 66, 8, 9, 5},
+		Uints8:  []uint8{234, 16},
+		Uints16: []uint16{5, 5, 5, 5, 6},
+		Uints32: []uint32{9, 8, 7, 6, 5, 4, 3, 2, 1},
+		Uints64: []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+
+		Floats32: []float32{3.14, -2.71},
+		Floats64: []float64{2.71828, -3.14},
+		Bools:    []bool{true, false, true},
+
+		Strs: []string{"Hello", "RAF", "Test"},
 	}
 }
 
@@ -527,5 +563,73 @@ func TestUnmarshal_Failed_InvalidData(t *testing.T) {
 	expectedErr := "invalid RAF data"
 	if err.Error() != expectedErr {
 		t.Fatalf("unexpected error message: got %q, want %q", err.Error(), expectedErr)
+	}
+}
+
+func TestUnmarshalMap(t *testing.T) {
+	primitives := getFullPrimitive()
+	data, err := raf.Marshal(primitives)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	expected := map[string]any{
+		"str":        "Hello, RAF!",
+		"int8":       int64(-8),
+		"int16":      int64(-16),
+		"int32":      int64(-32),
+		"int64":      int64(-64),
+		"int":        int64(-12345),
+		"uint8":      int64(8),
+		"uint16":     int64(16),
+		"uint32":     int64(32),
+		"uint64":     int64(64),
+		"uint":       int64(12345),
+		"float32":    float64(float32(3.14)),
+		"float64":    float64(2.71828),
+		"bool":       true,
+		"null":       nil,
+		"ptr_str":    "Pointer to string",
+		"ptr_int":    int64(42),
+		"ptr_null":   nil,
+		"empty_str":  "",
+		"empty_ptr":  "",
+		"empty_int":  int64(0),
+		"empty_bool": false,
+
+		"ints":   []int64{-1, 0, 1},
+		"ints8":  []int64{-8, 0, 8},
+		"ints16": []int64{-16, 0, 16},
+		"ints32": []int64{-32, 0, 32},
+		"ints64": []int64{-64, 0, 64},
+
+		"uints":   []int64{123, 123, 5, 66, 8, 9, 5},
+		"uints8":  []int64{234, 16},
+		"uints16": []int64{5, 5, 5, 5, 6},
+		"uints32": []int64{9, 8, 7, 6, 5, 4, 3, 2, 1},
+		"uints64": []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+
+		"floats32": []float64{3.140000104904175, -2.7100000381469727},
+		"floats64": []float64{2.71828, -3.14},
+		"bools":    []bool{true, false, true},
+		// "int_pointers": []*int{new(int(1)), new(int(2)), new(int(3)), nil},
+
+		"strings": []string{"Hello", "RAF", "Test"},
+	}
+
+	var got map[string]any
+	if err := Unmarshal(data, &got); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	for k, v := range expected {
+		gotVal, ok := got[k]
+		if !ok {
+			t.Fatalf("missing key in result: %s", k)
+		}
+
+		if !reflect.DeepEqual(gotVal, v) {
+			t.Fatalf("unexpected value for key %q: got (%T)%+v, want (%T)%+v", k, gotVal, gotVal, v, v)
+		}
 	}
 }

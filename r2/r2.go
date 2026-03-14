@@ -98,6 +98,11 @@ func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
 		return ErrInvalidRAFData
 	}
 
+	if m, ok := v.(*map[string]any); ok {
+		*m = unmarshalBlockToMap(block)
+		return nil
+	}
+
 	valueOf := reflect.ValueOf(v)
 	if valueOf.Kind() != reflect.Pointer || valueOf.IsNil() {
 		return fmt.Errorf("Unmarshal expects a non-nil pointer")
@@ -109,6 +114,75 @@ func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
 		block,
 		unsafe.Pointer(valueOf.Pointer()),
 	)
+}
+
+func unmarshalBlockToMap(block raf.Block) map[string]any {
+	n := block.NumPairs()
+	m := make(map[string]any, n)
+	for i := range n {
+		m[string(block.KeyAt(i))] = unmarshalValueToAny(block.ValueAt(i))
+	}
+	return m
+}
+
+func unmarshalValueToAny(val raf.Value) any {
+	switch val.Type {
+	case raf.TypeString:
+		return val.String()
+	case raf.TypeInt64:
+		return val.Int64()
+	case raf.TypeFloat64:
+		return val.Float64()
+	case raf.TypeBool:
+		return val.Bool()
+	case raf.TypeNull:
+		return nil
+	case raf.TypeMap:
+		return unmarshalBlockToMap(val.Map())
+	case raf.TypeArray:
+		arr := val.Array()
+		n := arr.Len()
+		switch arr.ElemType() {
+		case raf.TypeString:
+			s := make([]string, n)
+			for i := range n {
+				s[i] = string(arr.At(i))
+			}
+			return s
+		case raf.TypeInt64:
+			s := make([]int64, n)
+			for i := range n {
+				s[i] = arr.AtInt64(i)
+			}
+			return s
+		case raf.TypeFloat64:
+			s := make([]float64, n)
+			for i := range n {
+				s[i] = arr.AtFloat64(i)
+			}
+			return s
+		case raf.TypeBool:
+			s := make([]bool, n)
+			for i := range n {
+				s[i] = arr.AtBool(i)
+			}
+			return s
+		case raf.TypeMap:
+			s := make([]map[string]any, n)
+			for i := range n {
+				s[i] = unmarshalBlockToMap(raf.NewBlock(arr.At(i)))
+			}
+			return s
+		default:
+			s := make([]any, n)
+			for i := range n {
+				s[i] = unmarshalValueToAny(raf.Value{Type: arr.ElemType(), Data: arr.At(i)})
+			}
+			return s
+		}
+	default:
+		return nil
+	}
 }
 
 func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
