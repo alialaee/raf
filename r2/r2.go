@@ -15,47 +15,51 @@ import (
 
 var defaultUnmarshaler = NewUnmarshaler()
 
+var (
+	ErrInvalidRAFData = errors.New("invalid RAF data")
+)
+
 func Unmarshal(data []byte, v any) error {
 	return defaultUnmarshaler.Unmarshal(data, v)
 }
 
-type TypeMismatchError struct {
+type ErrTypeMismatch struct {
 	Key          string
 	ExpectedType raf.Type
-	ActualType   raf.Type
+	ActualType   reflect.Kind
 	Inner        error
 }
 
-func (e *TypeMismatchError) Error() string {
+func (e *ErrTypeMismatch) Error() string {
 	if e.Inner != nil {
 		return fmt.Sprintf("type mismatch for key %s: expected %s, got %s: %v", e.Key, e.ExpectedType, e.ActualType, e.Inner)
 	}
 	return fmt.Sprintf("type mismatch for key %s: expected %s, got %s", e.Key, e.ExpectedType, e.ActualType)
 }
 
-func (e *TypeMismatchError) Unwrap() error {
+func (e *ErrTypeMismatch) Unwrap() error {
 	return e.Inner
 }
 
-func (e *TypeMismatchError) WithWrap(err error) error {
+func (e *ErrTypeMismatch) WithWrap(err error) error {
 	e.Inner = err
 	return e
 }
 
-func (e *TypeMismatchError) Is(target error) bool {
+func (e *ErrTypeMismatch) Is(target error) bool {
 	if e.Inner != nil && errors.Is(e.Inner, target) {
 		return true
 	}
 
-	t, ok := target.(*TypeMismatchError)
+	t, ok := target.(*ErrTypeMismatch)
 	if !ok {
 		return false
 	}
 	return e.Key == t.Key && e.ExpectedType == t.ExpectedType && e.ActualType == t.ActualType
 }
 
-func newTypeMismatchError(key string, expected raf.Type, actual raf.Type) *TypeMismatchError {
-	return &TypeMismatchError{
+func newErrTypeMismatch(key string, expected raf.Type, actual reflect.Kind) *ErrTypeMismatch {
+	return &ErrTypeMismatch{
 		Key:          key,
 		ExpectedType: expected,
 		ActualType:   actual,
@@ -81,6 +85,11 @@ type unmarshalOP struct {
 }
 
 func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
+	block := raf.Block(data)
+	if !block.Valid() {
+		return ErrInvalidRAFData
+	}
+
 	valueOf := reflect.ValueOf(v)
 	if valueOf.Kind() != reflect.Pointer || valueOf.IsNil() {
 		return fmt.Errorf("Unmarshal expects a non-nil pointer")
@@ -89,7 +98,7 @@ func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
 	typeOf := valueOf.Type().Elem()
 	return u.unmarshalWithOps(
 		u.loadOPs(typeOf),
-		raf.NewBlock(data),
+		block,
 		unsafe.Pointer(valueOf.Pointer()),
 	)
 }
@@ -190,7 +199,7 @@ func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base u
 		}
 
 		if !typeCompatible(val.Type, targetKind) {
-			return newTypeMismatchError(string(op.rafName), val.Type, raf.Type(targetKind))
+			return newErrTypeMismatch(string(op.rafName), val.Type, targetKind)
 		}
 
 		switch targetKind {
@@ -229,10 +238,10 @@ func (u *Unmarshaler) unmarshalWithOps(ops []unmarshalOP, data raf.Block, base u
 		case reflect.Slice:
 			fieldValue := reflect.NewAt(op.fieldType, fieldPtr).Elem()
 			if err := u.unmarshalValueInto(fieldValue, val); err != nil {
-				return newTypeMismatchError(string(op.rafName), val.Type, raf.Type(targetKind)).WithWrap(err)
+				return newErrTypeMismatch(string(op.rafName), val.Type, targetKind).WithWrap(err)
 			}
 		default:
-			return fmt.Errorf("%w: unsupported target kind %s", newTypeMismatchError(string(op.rafName), val.Type, raf.Type(targetKind)), targetKind)
+			return fmt.Errorf("%w: unsupported target kind %s", newErrTypeMismatch(string(op.rafName), val.Type, targetKind), targetKind)
 		}
 
 		opsI++

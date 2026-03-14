@@ -2,6 +2,7 @@ package r2
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"testing"
 
@@ -192,7 +193,7 @@ func getFullPrimitive() FullPrimitive {
 	}
 }
 
-func TestUnmarshal(t *testing.T) {
+func TestUnmarshal_Success(t *testing.T) {
 	t.Run("All primitive types", func(t *testing.T) {
 		testUnmarshal(t, getFullPrimitive(), getFullPrimitive())
 	})
@@ -248,20 +249,21 @@ func TestUnmarshal(t *testing.T) {
 
 	t.Run("Struct with array fields", func(t *testing.T) {
 		type WithArrays struct {
-			Strs    []string  `raf:"strs"`
-			Ints    []int     `raf:"ints"`
-			Ints8   []int8    `raf:"ints8"`
-			Ints16  []int16   `raf:"ints16"`
-			Ints32  []int32   `raf:"ints32"`
-			Ints64  []int64   `raf:"ints64"`
-			Uints   []uint    `raf:"uints"`
-			Uints8  []uint8   `raf:"uints8"`
-			Uints16 []uint16  `raf:"uints16"`
-			Uints32 []uint32  `raf:"uints32"`
-			Uints64 []uint64  `raf:"uints64"`
-			Float32 []float32 `raf:"float32s"`
-			Float64 []float64 `raf:"float64s"`
-			Bools   []bool    `raf:"bools"`
+			Strs        []string  `raf:"strs"`
+			Ints        []int     `raf:"ints"`
+			Ints8       []int8    `raf:"ints8"`
+			Ints16      []int16   `raf:"ints16"`
+			Ints32      []int32   `raf:"ints32"`
+			Ints64      []int64   `raf:"ints64"`
+			Uints       []uint    `raf:"uints"`
+			Uints8      []uint8   `raf:"uints8"`
+			Uints16     []uint16  `raf:"uints16"`
+			Uints32     []uint32  `raf:"uints32"`
+			Uints64     []uint64  `raf:"uints64"`
+			Float32     []float32 `raf:"float32s"`
+			Float64     []float64 `raf:"float64s"`
+			Bools       []bool    `raf:"bools"`
+			IntPointers []*int    `raf:"int_pointers"`
 		}
 
 		testUnmarshalSame(t, WithArrays{
@@ -279,8 +281,41 @@ func TestUnmarshal(t *testing.T) {
 			Float32: []float32{3.14, -2.71},
 			Float64: []float64{2.71828, -3.14},
 			Bools:   []bool{true, false, true},
+			// IntPointers: []*int{nil, new(int(0)), new(int(1))}, // TODO
 		})
 	})
+
+	t.Run("Struct with array of structs", func(t *testing.T) {
+		type Inner struct {
+			A int    `raf:"a"`
+			B string `raf:"b"`
+		}
+
+		type WithArrayOfStructs struct {
+			Array []Inner `raf:"array"`
+		}
+
+		testUnmarshalSame(t, WithArrayOfStructs{
+			Array: []Inner{
+				{A: 1, B: "One"},
+				{A: 2, B: "Two"},
+				{A: 3, B: "Three"},
+			},
+		})
+	})
+
+	// t.Run("Struct with array of arrays", func(t *testing.T) {
+	// 	type WithArrayOfArrays struct {
+	// 		ArrayOfArrays [][]string `raf:"array_of_arrays"`
+	// 	}
+
+	// 	testUnmarshalSame(t, WithArrayOfArrays{
+	// 		ArrayOfArrays: [][]string{
+	// 			{"Hello", "World"},
+	// 			{"RAF", "Test"},
+	// 		},
+	// 	})
+	// })
 
 	t.Run("Struct with empty array fields", func(t *testing.T) {
 		type WithEmptyArrays struct {
@@ -367,7 +402,7 @@ func TestUnmarshal(t *testing.T) {
 		})
 	})
 
-	t.Run("Struct with - fields in RAF data", func(t *testing.T) {
+	t.Run("Struct with '-' fields in RAF data", func(t *testing.T) {
 		type WithIgnored struct {
 			Num1 int  `raf:"num1"`
 			Num2 int  `raf:"-"`
@@ -385,4 +420,112 @@ func TestUnmarshal(t *testing.T) {
 		})
 	})
 
+	t.Run("Struct without RAF tags", func(t *testing.T) {
+		type NoTags struct {
+			Num  int
+			Str  string
+			Bool bool
+		}
+
+		type WithTags struct {
+			Num  int    `raf:"num"`
+			Str  string `raf:"str"`
+			Bool bool   `raf:"bool"`
+		}
+
+		testUnmarshal(t, WithTags{
+			Num:  42,
+			Str:  "Hello",
+			Bool: true,
+		}, NoTags{
+			Num:  42,
+			Str:  "Hello",
+			Bool: true,
+		})
+	})
+
+	t.Run("Maximum values for integer types", func(t *testing.T) {
+		type MaxInts struct {
+			Int8   int8   `raf:"int8"`
+			Int16  int16  `raf:"int16"`
+			Int32  int32  `raf:"int32"`
+			Int64  int64  `raf:"int64"`
+			Uint8  uint8  `raf:"uint8"`
+			Uint16 uint16 `raf:"uint16"`
+			Uint32 uint32 `raf:"uint32"`
+			Uint64 uint64 `raf:"uint64"`
+		}
+
+		testUnmarshalSame(t, MaxInts{
+			Int8:   math.MaxInt8,
+			Int16:  math.MaxInt16,
+			Int32:  math.MaxInt32,
+			Int64:  math.MaxInt64,
+			Uint8:  math.MaxUint8,
+			Uint16: math.MaxUint16,
+			Uint32: math.MaxUint32,
+			Uint64: math.MaxUint64,
+		})
+	})
+
+	t.Run("Minimum values for integer types", func(t *testing.T) {
+		type MinInts struct {
+			Int8  int8  `raf:"int8"`
+			Int16 int16 `raf:"int16"`
+			Int32 int32 `raf:"int32"`
+			Int64 int64 `raf:"int64"`
+		}
+
+		testUnmarshalSame(t, MinInts{
+			Int8:  math.MinInt8,
+			Int16: math.MinInt16,
+			Int32: math.MinInt32,
+			Int64: math.MinInt64,
+		})
+	})
+}
+
+func TestUnmarshal_Failed_TypeMismatch(t *testing.T) {
+	type A struct {
+		Num int `raf:"num"`
+	}
+
+	type B struct {
+		Num string `raf:"num"`
+	}
+
+	data, err := raf.Marshal(A{Num: 42})
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var b B
+	err = Unmarshal(data, &b)
+	if err == nil {
+		t.Fatal("expected error but got nil")
+	}
+
+	expectedErr := "type mismatch for key num: expected int64, got string"
+	if err.Error() != expectedErr {
+		t.Fatalf("unexpected error message: got %q, want %q", err.Error(), expectedErr)
+	}
+}
+
+func TestUnmarshal_Failed_InvalidData(t *testing.T) {
+	type A struct {
+		Num int `raf:"num"`
+	}
+
+	data := []byte{0x01, 0x00, 0x01, 0x01, 0x00, 0x00}
+
+	var a A
+	err := Unmarshal(data, &a)
+	if err == nil {
+		t.Fatal("expected error but got nil")
+	}
+
+	expectedErr := "invalid RAF data"
+	if err.Error() != expectedErr {
+		t.Fatalf("unexpected error message: got %q, want %q", err.Error(), expectedErr)
+	}
 }

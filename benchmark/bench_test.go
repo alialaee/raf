@@ -95,8 +95,8 @@ func BenchmarkRAF_Unmarshal_V2(b *testing.B) {
 	dec := r2.NewUnmarshaler()
 
 	b.ResetTimer()
-	var p Player
 	for i := range b.N {
+		var p Player
 		err := dec.Unmarshal(marshaledPlayers[i%len(players)], &p)
 		if err != nil {
 			b.Fatal(err)
