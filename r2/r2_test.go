@@ -3,13 +3,10 @@ package r2
 import (
 	"encoding/json"
 	"reflect"
-	"sync"
 	"testing"
 
 	"github.com/alialaee/raf"
 )
-
-var opsCache sync.Map // map[reflect.Type][]opSet
 
 type Contact struct {
 	Email string `raf:"email"`

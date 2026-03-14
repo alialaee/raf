@@ -248,7 +248,7 @@ func (u *Unmarshaler) unmarshalValueInto(dst reflect.Value, val raf.Value) error
 		if dst.IsNil() || dst.Cap() < arr.Len() {
 			dst.Set(reflect.MakeSlice(dst.Type(), arr.Len(), arr.Len()))
 		} else {
-			dst.SetLen(arr.Len())
+			dst.SetLen(arr.Len()) // TODO: consider removing this. Let's always allocate.
 		}
 		for i := 0; i < arr.Len(); i++ {
 			elemVal := raf.Value{Type: arr.ElemType(), Data: arr.At(i)}
