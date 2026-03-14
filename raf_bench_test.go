@@ -2,18 +2,19 @@ package raf
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
 func BenchmarkBuilderBuild(b *testing.B) {
 	builder := NewBuilder()
 
-	keys := [][]byte{
-		[]byte("age"),
-		[]byte("city"),
-		[]byte("is_active"),
-		[]byte("name"),
-		[]byte("score"),
+	keys := []string{
+		"age",
+		"city",
+		"is_active",
+		"name",
+		"score",
 	}
 
 	dst := make([]byte, 1024)
@@ -40,8 +41,8 @@ func BenchmarkBuilderBuild(b *testing.B) {
 func BenchmarkBlockGet(b *testing.B) {
 	builder := NewBuilder()
 
-	for i := range byte(50) {
-		builder.AddInt64([]byte{i, 'k', 'e', 'y'}, int64(i))
+	for i := range 50 {
+		builder.AddInt64(fmt.Sprintf("key%02d", i), int64(i))
 	}
 
 	dst, err := builder.Build(nil)
@@ -50,10 +51,11 @@ func BenchmarkBlockGet(b *testing.B) {
 	}
 
 	block := NewBlock(dst)
-	searchKey := []byte{25, 'k', 'e', 'y'}
+	searchKey := []byte("key25")
 
 	b.ReportAllocs()
 
+	b.ResetTimer()
 	for b.Loop() {
 		val, ok := block.Get(searchKey)
 		if !ok || val.Type != TypeInt64 {
@@ -64,11 +66,11 @@ func BenchmarkBlockGet(b *testing.B) {
 
 func BenchmarkLookup(b *testing.B) {
 	builder := NewBuilder()
-	builder.AddInt64([]byte("age"), 30)
-	builder.AddString([]byte("city"), []byte("Berlin"))
-	builder.AddBool([]byte("is_active"), true)
-	builder.AddString([]byte("name"), []byte("Ali Alaee"))
-	builder.AddFloat64([]byte("score"), 99.5)
+	builder.AddInt64("age", 30)
+	builder.AddStringString("city", "Berlin")
+	builder.AddBool("is_active", true)
+	builder.AddStringString("name", "Ali Alaee")
+	builder.AddFloat64("score", 99.5)
 
 	dst, err := builder.Build(nil)
 	if err != nil {
@@ -150,8 +152,8 @@ func BenchmarkArrayBuild(b *testing.B) {
 
 	for b.Loop() {
 		builder.Reset()
-		builder.AddInt64Array([]byte("a_ints"), ints)
-		builder.AddStringArray([]byte("b_strs"), strs)
+		builder.AddInt64Array("a_ints", ints)
+		builder.AddStringArray("b_strs", strs)
 
 		var err error
 		dst, err = builder.Build(dst)
@@ -199,8 +201,8 @@ func BenchmarkArrayRead(b *testing.B) {
 		ints[i] = int64(i * 7)
 	}
 
-	builder.AddInt64Array([]byte("a_ints"), ints)
-	builder.AddStringArray([]byte("b_strs"), [][]byte{
+	builder.AddInt64Array("a_ints", ints)
+	builder.AddStringArray("b_strs", [][]byte{
 		[]byte("hello"), []byte("world"), []byte("foo"), []byte("bar"),
 	})
 
@@ -237,8 +239,8 @@ func BenchmarkMapBuild(b *testing.B) {
 
 	for b.Loop() {
 		inner.Reset()
-		inner.AddString([]byte("city"), []byte("Berlin"))
-		inner.AddString([]byte("name"), []byte("Ali"))
+		inner.AddStringString("city", "Berlin")
+		inner.AddStringString("name", "Ali")
 
 		var err error
 		innerDst, err = inner.Build(innerDst)
@@ -247,9 +249,9 @@ func BenchmarkMapBuild(b *testing.B) {
 		}
 
 		outer.Reset()
-		outer.AddInt64([]byte("age"), 30)
-		outer.AddMap([]byte("meta"), innerDst)
-		outer.AddFloat64([]byte("score"), 99.5)
+		outer.AddInt64("age", 30)
+		outer.AddMap("meta", innerDst)
+		outer.AddFloat64("score", 99.5)
 
 		outerDst, err = outer.Build(outerDst)
 		if err != nil {
@@ -261,14 +263,14 @@ func BenchmarkMapBuild(b *testing.B) {
 
 func BenchmarkMapRead(b *testing.B) {
 	inner := NewBuilder()
-	inner.AddString([]byte("city"), []byte("Berlin"))
-	inner.AddString([]byte("name"), []byte("Ali"))
+	inner.AddStringString("city", "Berlin")
+	inner.AddStringString("name", "Ali")
 	innerDst, _ := inner.Build(nil)
 
 	outer := NewBuilder()
-	outer.AddInt64([]byte("age"), 30)
-	outer.AddMap([]byte("meta"), innerDst)
-	outer.AddFloat64([]byte("score"), 99.5)
+	outer.AddInt64("age", 30)
+	outer.AddMap("meta", innerDst)
+	outer.AddFloat64("score", 99.5)
 	outerDst, _ := outer.Build(nil)
 
 	block := NewBlock(outerDst)

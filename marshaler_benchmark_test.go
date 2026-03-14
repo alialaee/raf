@@ -42,11 +42,11 @@ func BenchmarkMarshalManual(b *testing.B) {
 	builder := NewBuilder()
 	var err error
 
-	keyID := []byte("id")
-	keyIsActive := []byte("is_active")
-	keyName := []byte("name")
-	keyRoles := []byte("roles")
-	keyScore := []byte("score")
+	keyID := "id"
+	keyIsActive := "is_active"
+	keyName := "name"
+	keyRoles := "roles"
+	keyScore := "score"
 
 	b.ReportAllocs()
 

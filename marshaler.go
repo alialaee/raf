@@ -1,7 +1,6 @@
 package raf
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"reflect"
@@ -11,7 +10,7 @@ import (
 
 type cachedField struct {
 	index int
-	name  []byte
+	name  string
 }
 
 type structFields struct {
@@ -29,11 +28,11 @@ func computeStructFields(rt reflect.Type) *structFields {
 		if skip {
 			continue
 		}
-		fields = append(fields, cachedField{index: i, name: []byte(name)})
+		fields = append(fields, cachedField{index: i, name: name})
 		byName[name] = i
 	}
 	sort.Slice(fields, func(i, j int) bool {
-		return bytes.Compare(fields[i].name, fields[j].name) < 0
+		return fields[i].name < fields[j].name
 	})
 	return &structFields{fields: fields, byName: byName}
 }
@@ -87,7 +86,7 @@ func (m *Marshaler) Marshal(v any) ([]byte, error) {
 	return builder.Build(nil)
 }
 
-func (m *Marshaler) marshalToBuilder(builder *Builder, rv reflect.Value, key []byte) error {
+func (m *Marshaler) marshalToBuilder(builder *Builder, rv reflect.Value, key string) error {
 	for rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface {
 		if rv.IsNil() {
 			return builder.AddNull(key)
@@ -135,7 +134,7 @@ func (m *Marshaler) marshalMapOrStruct(builder *Builder, rv reflect.Value) error
 	}
 
 	type kv struct {
-		key []byte
+		key string
 		val reflect.Value
 	}
 
@@ -145,11 +144,11 @@ func (m *Marshaler) marshalMapOrStruct(builder *Builder, rv reflect.Value) error
 
 	pairs := make([]kv, 0, rv.Len())
 	for _, k := range rv.MapKeys() {
-		pairs = append(pairs, kv{key: []byte(k.String()), val: rv.MapIndex(k)})
+		pairs = append(pairs, kv{key: k.String(), val: rv.MapIndex(k)})
 	}
 
 	sort.Slice(pairs, func(i, j int) bool {
-		return bytes.Compare(pairs[i].key, pairs[j].key) < 0
+		return pairs[i].key < pairs[j].key
 	})
 
 	for _, p := range pairs {
@@ -160,7 +159,7 @@ func (m *Marshaler) marshalMapOrStruct(builder *Builder, rv reflect.Value) error
 	return nil
 }
 
-func (m *Marshaler) marshalArray(builder *Builder, rv reflect.Value, key []byte) error {
+func (m *Marshaler) marshalArray(builder *Builder, rv reflect.Value, key string) error {
 	if rv.Len() == 0 {
 		return builder.AddStringArray(key, nil)
 	}

@@ -1,11 +1,11 @@
 package raf
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 )
 
 type Type uint8
@@ -78,7 +78,7 @@ type Builder struct {
 	valOffsets []uint16 // Starts with 0
 	types      []byte
 
-	lastKey       []byte   // Tracked to ensure keys are added in sorted order
+	lastKey       string   // Tracked to ensure keys are added in sorted order
 	arrayBuf      []byte   // Scratch buffer reused for array value serialization
 	inner         *Builder // Reusable inner builder for nested map and struct encoding
 	innerBuildBuf []byte   // Scratch buffer for inner.Build output and it's preserved across Reset
@@ -102,12 +102,12 @@ func (b *Builder) Reset() {
 	b.valOffsets = append(b.valOffsets, 0)
 
 	b.types = b.types[:0]
-	b.lastKey = nil
+	b.lastKey = ""
 	b.arrayBuf = b.arrayBuf[:0]
 }
 
 // checkKey verifies that the key is strictly greater than the last added key.
-func (b *Builder) checkKey(key []byte) error {
+func (b *Builder) checkKey(key string) error {
 	keySize := len(key)
 	if keySize == 0 {
 		return fmt.Errorf("%w: keys should be larger than zero", ErrInvalidKey)
@@ -117,7 +117,7 @@ func (b *Builder) checkKey(key []byte) error {
 	}
 
 	if len(b.keys) > 0 {
-		cmp := bytes.Compare(key, b.lastKey)
+		cmp := strings.Compare(key, b.lastKey)
 		if cmp == 0 {
 			return fmt.Errorf("%w: duplicate key", ErrInvalidKey)
 		}
@@ -133,14 +133,11 @@ func (b *Builder) checkKey(key []byte) error {
 	return nil
 }
 
-func (b *Builder) appendKey(key []byte) {
+func (b *Builder) appendKey(key string) {
 	b.keys = append(b.keys, key...)
 	b.keyOffsets = append(b.keyOffsets, uint16(len(b.keys)))
 
-	// Store a copy of the key (reusing memory from b.keys) to avoid allocation
-	// The new lastKey starts exactly at the offset before the one we just added.
-	start := b.keyOffsets[len(b.keyOffsets)-2]
-	b.lastKey = b.keys[start:]
+	b.lastKey = key
 }
 
 func (b *Builder) appendValue(valType Type, valBytes []byte) {
@@ -149,7 +146,7 @@ func (b *Builder) appendValue(valType Type, valBytes []byte) {
 	b.types = append(b.types, uint8(valType))
 }
 
-func (b *Builder) AddString(key, val []byte) error {
+func (b *Builder) AddString(key string, val []byte) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -160,7 +157,7 @@ func (b *Builder) AddString(key, val []byte) error {
 
 // AddStringString is a helper for adding string values without
 // unnecessary byte slice conversions.
-func (b *Builder) AddStringString(key []byte, val string) error {
+func (b *Builder) AddStringString(key string, val string) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -173,7 +170,7 @@ func (b *Builder) AddStringString(key []byte, val string) error {
 	return nil
 }
 
-func (b *Builder) AddInt64(key []byte, val int64) error {
+func (b *Builder) AddInt64(key string, val int64) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -186,7 +183,7 @@ func (b *Builder) AddInt64(key []byte, val int64) error {
 	return nil
 }
 
-func (b *Builder) AddFloat64(key []byte, val float64) error {
+func (b *Builder) AddFloat64(key string, val float64) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -199,7 +196,7 @@ func (b *Builder) AddFloat64(key []byte, val float64) error {
 	return nil
 }
 
-func (b *Builder) AddBool(key []byte, val bool) error {
+func (b *Builder) AddBool(key string, val bool) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -216,7 +213,7 @@ func (b *Builder) AddBool(key []byte, val bool) error {
 	return nil
 }
 
-func (b *Builder) AddNull(key []byte) error {
+func (b *Builder) AddNull(key string) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -227,7 +224,7 @@ func (b *Builder) AddNull(key []byte) error {
 }
 
 // AddMap adds a map value. val must be a pre-built block (from Builder.Build).
-func (b *Builder) AddMap(key []byte, val []byte) error {
+func (b *Builder) AddMap(key string, val []byte) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -239,7 +236,7 @@ func (b *Builder) AddMap(key []byte, val []byte) error {
 // AddMapFn writes a nested map/struct value by calling fn with a reusable inner Builder.
 // The inner Builder is reset before fn is called and must not be retained after fn returns.
 // After warmup, this method incurs zero allocations.
-func (b *Builder) AddMapFn(key []byte, fn func(inner *Builder) error) error {
+func (b *Builder) AddMapFn(key string, fn func(inner *Builder) error) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -263,7 +260,7 @@ func (b *Builder) AddMapFn(key []byte, fn func(inner *Builder) error) error {
 // addMapArrayFromFn writes a TypeArray(TypeMap) value where each element is built by fn.
 // fn is called once per element; its inner Builder is reset between calls.
 // A single inner Builder is reused for all elements, avoiding per-element allocations.
-func (b *Builder) addMapArrayFromFn(key []byte, count int, fn func(i int, inner *Builder) error) error {
+func (b *Builder) addMapArrayFromFn(key string, count int, fn func(i int, inner *Builder) error) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -312,17 +309,17 @@ func (b *Builder) appendArrayHeader(elemType Type, count int) {
 	b.arrayBuf = append(b.arrayBuf, buf[:]...)
 }
 
-func (b *Builder) AddStringArray(key []byte, vals [][]byte) error {
+func (b *Builder) AddStringArray(key string, vals [][]byte) error {
 	return addStringArray(b, key, vals)
 }
 
 // AddStringStringArray is a helper for adding arrays of strings without
 // unnecessary byte slice conversions.
-func (b *Builder) AddStringStringArray(key []byte, vals []string) error {
+func (b *Builder) AddStringStringArray(key string, vals []string) error {
 	return addStringArray(b, key, vals)
 }
 
-func (b *Builder) AddInt64Array(key []byte, vals []int64) error {
+func (b *Builder) AddInt64Array(key string, vals []int64) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -340,7 +337,7 @@ func (b *Builder) AddInt64Array(key []byte, vals []int64) error {
 	return nil
 }
 
-func (b *Builder) AddFloat64Array(key []byte, vals []float64) error {
+func (b *Builder) AddFloat64Array(key string, vals []float64) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -358,7 +355,7 @@ func (b *Builder) AddFloat64Array(key []byte, vals []float64) error {
 	return nil
 }
 
-func (b *Builder) AddBoolArray(key []byte, vals []bool) error {
+func (b *Builder) AddBoolArray(key string, vals []bool) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -380,7 +377,7 @@ func (b *Builder) AddBoolArray(key []byte, vals []bool) error {
 
 // AddMapArray adds an array of pre-built map blocks.
 // Each element of vals must be a valid RAF block (from Builder.Build).
-func (b *Builder) AddMapArray(key []byte, vals [][]byte) error {
+func (b *Builder) AddMapArray(key string, vals [][]byte) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
@@ -488,7 +485,7 @@ func (b *Builder) Build(dst []byte) ([]byte, error) {
 	return dst, nil
 }
 
-func addStringArray[T interface{ string | []byte }](b *Builder, key []byte, vals []T) error {
+func addStringArray[T interface{ string | []byte }](b *Builder, key string, vals []T) error {
 	if err := b.checkKey(key); err != nil {
 		return err
 	}
