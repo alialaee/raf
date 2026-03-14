@@ -24,6 +24,27 @@ const (
 	maxKeySize = 4 * 1024
 )
 
+func (t Type) String() string {
+	switch t {
+	case TypeString:
+		return "string"
+	case TypeInt64:
+		return "int64"
+	case TypeFloat64:
+		return "float64"
+	case TypeBool:
+		return "bool"
+	case TypeNull:
+		return "null"
+	case TypeArray:
+		return "array"
+	case TypeMap:
+		return "map"
+	default:
+		return fmt.Sprintf("unknown(%d)", t)
+	}
+}
+
 var (
 	ErrBlockTooLarge = errors.New("raf: block too large (max 64KB)")
 	ErrTooManyPairs  = errors.New("raf: too many pairs (max 255)")

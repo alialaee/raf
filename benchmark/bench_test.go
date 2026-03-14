@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/alialaee/raf"
+	"github.com/alialaee/raf/r2"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/vmihailenco/msgpack/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -75,6 +76,28 @@ func BenchmarkRAF_Unmarshal(b *testing.B) {
 	for i := range b.N {
 		var p Player
 		err := raf.Unmarshal(marshaledPlayers[i%len(players)], &p)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRAF_Unmarshal_V2(b *testing.B) {
+	marshaledPlayers := make([][]byte, len(players))
+	for i, p := range players {
+		data, err := raf.Marshal(p)
+		if err != nil {
+			b.Fatal(err)
+		}
+		marshaledPlayers[i] = data
+	}
+
+	dec := r2.NewUnmarshaler()
+
+	b.ResetTimer()
+	for i := range b.N {
+		var p Player
+		err := dec.Unmarshal(marshaledPlayers[i%len(players)], &p)
 		if err != nil {
 			b.Fatal(err)
 		}

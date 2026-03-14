@@ -1,0 +1,410 @@
+package r2
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"reflect"
+	"sort"
+	"strings"
+	"sync"
+	"unsafe"
+
+	"github.com/alialaee/raf"
+)
+
+var defaultUnmarshaler = NewUnmarshaler()
+
+var (
+	ErrInvalidRAFData = errors.New("invalid RAF data")
+)
+
+func Unmarshal(data []byte, v any) error {
+	return defaultUnmarshaler.Unmarshal(data, v)
+}
+
+type ErrTypeMismatch struct {
+	Key          string
+	ExpectedType raf.Type
+	ActualType   reflect.Kind
+	Inner        error
+}
+
+func (e *ErrTypeMismatch) Error() string {
+	if e.Inner != nil {
+		return fmt.Sprintf("type mismatch for key %s: expected %s, got %s: %v", e.Key, e.ExpectedType, e.ActualType, e.Inner)
+	}
+	return fmt.Sprintf("type mismatch for key %s: expected %s, got %s", e.Key, e.ExpectedType, e.ActualType)
+}
+
+func (e *ErrTypeMismatch) Unwrap() error {
+	return e.Inner
+}
+
+func (e *ErrTypeMismatch) WithWrap(err error) error {
+	e.Inner = err
+	return e
+}
+
+func (e *ErrTypeMismatch) Is(target error) bool {
+	if e.Inner != nil && errors.Is(e.Inner, target) {
+		return true
+	}
+
+	t, ok := target.(*ErrTypeMismatch)
+	if !ok {
+		return false
+	}
+	return e.Key == t.Key && e.ExpectedType == t.ExpectedType && e.ActualType == t.ActualType
+}
+
+func newErrTypeMismatch(key string, expected raf.Type, actual reflect.Kind) *ErrTypeMismatch {
+	return &ErrTypeMismatch{
+		Key:          key,
+		ExpectedType: expected,
+		ActualType:   actual,
+	}
+}
+
+type Unmarshaler struct {
+	opsCache sync.Map
+}
+
+func NewUnmarshaler() *Unmarshaler {
+	return &Unmarshaler{}
+}
+
+type unmarshalOP struct {
+	offset     int
+	kind       reflect.Kind
+	fieldType  reflect.Type
+	targetType reflect.Type
+	targetKind reflect.Kind
+
+	// If the field is a slice
+	elemKind reflect.Kind
+	elemSize uintptr
+
+	// If the field is a struct or a slice of structs, nested contains
+	// the ops for the nested struct(s)
+	nested []unmarshalOP
+
+	rafName []byte
+}
+
+func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
+	block := raf.Block(data)
+	if !block.Valid() {
+		return ErrInvalidRAFData
+	}
+
+	if m, ok := v.(*map[string]any); ok {
+		*m = unmarshalBlockToMap(block)
+		return nil
+	}
+
+	valueOf := reflect.ValueOf(v)
+	if valueOf.Kind() != reflect.Pointer || valueOf.IsNil() {
+		return fmt.Errorf("Unmarshal expects a non-nil pointer")
+	}
+
+	typeOf := valueOf.Type().Elem()
+	return u.unmarshal(
+		u.loadOPs(typeOf),
+		block,
+		unsafe.Pointer(valueOf.Pointer()),
+	)
+}
+
+func unmarshalBlockToMap(block raf.Block) map[string]any {
+	n := block.NumPairs()
+	m := make(map[string]any, n)
+	for i := range n {
+		m[string(block.KeyAt(i))] = unmarshalValueToAny(block.ValueAt(i))
+	}
+	return m
+}
+
+func unmarshalValueToAny(val raf.Value) any {
+	switch val.Type {
+	case raf.TypeString:
+		return val.String()
+	case raf.TypeInt64:
+		return val.Int64()
+	case raf.TypeFloat64:
+		return val.Float64()
+	case raf.TypeBool:
+		return val.Bool()
+	case raf.TypeNull:
+		return nil
+	case raf.TypeMap:
+		return unmarshalBlockToMap(val.Map())
+	case raf.TypeArray:
+		arr := val.Array()
+		n := arr.Len()
+		switch arr.ElemType() {
+		case raf.TypeString:
+			s := make([]string, n)
+			for i := range n {
+				s[i] = string(arr.At(i))
+			}
+			return s
+		case raf.TypeInt64:
+			s := make([]int64, n)
+			for i := range n {
+				s[i] = arr.AtInt64(i)
+			}
+			return s
+		case raf.TypeFloat64:
+			s := make([]float64, n)
+			for i := range n {
+				s[i] = arr.AtFloat64(i)
+			}
+			return s
+		case raf.TypeBool:
+			s := make([]bool, n)
+			for i := range n {
+				s[i] = arr.AtBool(i)
+			}
+			return s
+		case raf.TypeMap:
+			s := make([]map[string]any, n)
+			for i := range n {
+				s[i] = unmarshalBlockToMap(raf.NewBlock(arr.At(i)))
+			}
+			return s
+		default:
+			s := make([]any, n)
+			for i := range n {
+				s[i] = unmarshalValueToAny(raf.Value{Type: arr.ElemType(), Data: arr.At(i)})
+			}
+			return s
+		}
+	default:
+		return nil
+	}
+}
+
+func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
+	ops := make([]unmarshalOP, 0, typ.NumField())
+	for field := range typ.Fields() {
+		fieldRafName, skip := fieldName(field)
+		if skip {
+			continue
+		}
+
+		targetType := field.Type
+		targetKind := field.Type.Kind()
+		if targetKind == reflect.Pointer {
+			targetType = field.Type.Elem()
+			targetKind = targetType.Kind()
+		}
+
+		ops = append(ops, unmarshalOP{
+			offset:     int(field.Offset),
+			kind:       field.Type.Kind(),
+			fieldType:  field.Type,
+			targetType: targetType,
+			targetKind: targetKind,
+			rafName:    []byte(fieldRafName),
+		})
+
+		switch targetKind {
+		case reflect.Struct:
+			ops[len(ops)-1].nested = u.compileOPs(targetType)
+		case reflect.Slice:
+			elemType := targetType.Elem()
+			ops[len(ops)-1].elemKind = elemType.Kind()
+			ops[len(ops)-1].elemSize = elemType.Size()
+			if elemType.Kind() == reflect.Struct {
+				ops[len(ops)-1].nested = u.compileOPs(elemType)
+			}
+		}
+	}
+
+	// Order keys by raf tag to match the order in the RAF block
+	sort.SliceStable(ops, func(i, j int) bool {
+		return bytes.Compare(ops[i].rafName, ops[j].rafName) < 0
+	})
+
+	return ops
+}
+
+func typeCompatible(valType raf.Type, targetKind reflect.Kind) bool {
+	switch valType {
+	case raf.TypeNull:
+		return true
+	case raf.TypeString:
+		return targetKind == reflect.String
+	case raf.TypeInt64:
+		return targetKind >= reflect.Int && targetKind <= reflect.Uint64
+	case raf.TypeFloat64:
+		return targetKind == reflect.Float32 || targetKind == reflect.Float64
+	case raf.TypeBool:
+		return targetKind == reflect.Bool
+	case raf.TypeMap:
+		return targetKind == reflect.Struct
+	case raf.TypeArray:
+		return targetKind == reflect.Slice
+	default:
+		return false
+	}
+}
+
+func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data raf.Block, base unsafe.Pointer) error {
+	for dataI, opsI := 0, 0; dataI < data.NumPairs() && opsI < len(ops); {
+		op := ops[opsI]
+		cmp := bytes.Compare(data.KeyAt(dataI), op.rafName)
+		if cmp > 0 {
+			opsI++
+			continue
+		}
+		if cmp < 0 {
+			dataI++
+			continue
+		}
+
+		fieldPtr := unsafe.Add(base, op.offset)
+		val := data.ValueAt(dataI)
+		targetKind := op.targetKind
+
+		if op.kind == reflect.Pointer {
+			fieldValue := reflect.NewAt(op.fieldType, fieldPtr).Elem()
+			if val.IsNull() {
+				fieldValue.SetZero()
+				opsI++
+				dataI++
+				continue
+			}
+			if fieldValue.IsNil() {
+				fieldValue.Set(reflect.New(op.targetType))
+			}
+			fieldPtr = unsafe.Pointer(fieldValue.Pointer())
+		}
+
+		if !typeCompatible(val.Type, targetKind) {
+			return newErrTypeMismatch(string(op.rafName), val.Type, targetKind)
+		}
+
+		switch targetKind {
+		case reflect.Int:
+			*(*int)(fieldPtr) = int(val.Int64())
+		case reflect.Int8:
+			*(*int8)(fieldPtr) = int8(val.Int64())
+		case reflect.Int16:
+			*(*int16)(fieldPtr) = int16(val.Int64())
+		case reflect.Int32:
+			*(*int32)(fieldPtr) = int32(val.Int64())
+		case reflect.Int64:
+			*(*int64)(fieldPtr) = val.Int64()
+		case reflect.Uint:
+			*(*uint)(fieldPtr) = uint(val.Int64())
+		case reflect.Uint8:
+			*(*uint8)(fieldPtr) = uint8(val.Int64())
+		case reflect.Uint16:
+			*(*uint16)(fieldPtr) = uint16(val.Int64())
+		case reflect.Uint32:
+			*(*uint32)(fieldPtr) = uint32(val.Int64())
+		case reflect.Uint64:
+			*(*uint64)(fieldPtr) = uint64(val.Int64())
+		case reflect.Float32:
+			*(*float32)(fieldPtr) = float32(val.Float64())
+		case reflect.Float64:
+			*(*float64)(fieldPtr) = val.Float64()
+		case reflect.Bool:
+			*(*bool)(fieldPtr) = val.Bool()
+		case reflect.String:
+			*(*string)(fieldPtr) = val.String()
+		case reflect.Struct:
+			if err := u.unmarshal(op.nested, val.Map(), fieldPtr); err != nil {
+				return err
+			}
+		case reflect.Slice:
+			if val.IsNull() {
+				reflect.NewAt(op.targetType, fieldPtr).Elem().SetZero()
+				break
+			}
+			arr := val.Array()
+			fieldValue := reflect.NewAt(op.targetType, fieldPtr).Elem()
+			arrLen := arr.Len()
+			if fieldValue.IsNil() || fieldValue.Cap() < arrLen {
+				fieldValue.Set(reflect.MakeSlice(op.targetType, arrLen, arrLen))
+			} else {
+				fieldValue.SetLen(arrLen)
+			}
+			if arrLen == 0 {
+				break
+			}
+			sliceBase := unsafe.Pointer(fieldValue.Pointer())
+			for i := range arrLen {
+				elemPtr := unsafe.Add(sliceBase, uintptr(i)*op.elemSize)
+				switch op.elemKind {
+				case reflect.Int:
+					*(*int)(elemPtr) = int(arr.AtInt64(i))
+				case reflect.Int8:
+					*(*int8)(elemPtr) = int8(arr.AtInt64(i))
+				case reflect.Int16:
+					*(*int16)(elemPtr) = int16(arr.AtInt64(i))
+				case reflect.Int32:
+					*(*int32)(elemPtr) = int32(arr.AtInt64(i))
+				case reflect.Int64:
+					*(*int64)(elemPtr) = arr.AtInt64(i)
+				case reflect.Uint:
+					*(*uint)(elemPtr) = uint(arr.AtInt64(i))
+				case reflect.Uint8:
+					*(*uint8)(elemPtr) = uint8(arr.AtInt64(i))
+				case reflect.Uint16:
+					*(*uint16)(elemPtr) = uint16(arr.AtInt64(i))
+				case reflect.Uint32:
+					*(*uint32)(elemPtr) = uint32(arr.AtInt64(i))
+				case reflect.Uint64:
+					*(*uint64)(elemPtr) = uint64(arr.AtInt64(i))
+				case reflect.Float32:
+					*(*float32)(elemPtr) = float32(arr.AtFloat64(i))
+				case reflect.Float64:
+					*(*float64)(elemPtr) = arr.AtFloat64(i)
+				case reflect.Bool:
+					*(*bool)(elemPtr) = arr.AtBool(i)
+				case reflect.String:
+					*(*string)(elemPtr) = string(arr.At(i))
+				case reflect.Struct:
+					if err := u.unmarshal(op.nested, raf.NewBlock(arr.At(i)), elemPtr); err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unsupported slice element kind: %s", op.elemKind)
+				}
+			}
+		default:
+			return fmt.Errorf("%w: unsupported target kind %s", newErrTypeMismatch(string(op.rafName), val.Type, targetKind), targetKind)
+		}
+
+		opsI++
+		dataI++
+	}
+	return nil
+}
+
+func (u *Unmarshaler) loadOPs(typ reflect.Type) []unmarshalOP {
+	ops, ok := u.opsCache.Load(typ)
+	if !ok {
+		ops = u.compileOPs(typ)
+		u.opsCache.Store(typ, ops)
+	}
+	return ops.([]unmarshalOP)
+}
+
+func fieldName(f reflect.StructField) (name string, skip bool) {
+	tag := f.Tag.Get("raf")
+	if !f.IsExported() {
+		return "", true
+	}
+	if tag == "-" {
+		return "", true
+	}
+	name = tag
+	if name == "" {
+		name = strings.ToLower(f.Name)
+	}
+	return name, false
+}
