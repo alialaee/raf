@@ -23,7 +23,7 @@ func (b Block) Valid() bool {
 	if b[0] != Version {
 		return false
 	}
-	size := binary.BigEndian.Uint16(b[1:3])
+	size := binary.LittleEndian.Uint16(b[1:3])
 	return int(size) == len(b)
 }
 
@@ -46,8 +46,8 @@ func (b Block) keyAt(i int, keysBegin int) []byte {
 	startOffsIdx := 4 + (i * 2)
 	endOffsIdx := startOffsIdx + 2
 
-	startOff := int(binary.BigEndian.Uint16(b[startOffsIdx : startOffsIdx+2]))
-	endOff := int(binary.BigEndian.Uint16(b[endOffsIdx : endOffsIdx+2]))
+	startOff := int(binary.LittleEndian.Uint16(b[startOffsIdx : startOffsIdx+2]))
+	endOff := int(binary.LittleEndian.Uint16(b[endOffsIdx : endOffsIdx+2]))
 
 	return b[keysBegin+startOff : keysBegin+endOff]
 }
@@ -61,7 +61,7 @@ func (b Block) ValueAt(i int) Value {
 	keysBegin := valOffsetsBegin + (n+1)*2
 
 	// Total key length from last key offset entry
-	keysLength := int(binary.BigEndian.Uint16(b[4+n*2 : 4+n*2+2]))
+	keysLength := int(binary.LittleEndian.Uint16(b[4+n*2 : 4+n*2+2]))
 	valsBegin := keysBegin + keysLength
 
 	return b.valueAt(i, valTypesBegin, valOffsetsBegin, valsBegin)
@@ -73,8 +73,8 @@ func (b Block) valueAt(i int, valTypesBegin, valOffsetsBegin, valsBegin int) Val
 	startOffsIdx := valOffsetsBegin + (i * 2)
 	endOffsIdx := startOffsIdx + 2
 
-	startOff := int(binary.BigEndian.Uint16(b[startOffsIdx : startOffsIdx+2]))
-	endOff := int(binary.BigEndian.Uint16(b[endOffsIdx : endOffsIdx+2]))
+	startOff := int(binary.LittleEndian.Uint16(b[startOffsIdx : startOffsIdx+2]))
+	endOff := int(binary.LittleEndian.Uint16(b[endOffsIdx : endOffsIdx+2]))
 
 	return Value{
 		Type: valType,
@@ -94,7 +94,7 @@ func (b Block) Get(key []byte) (Value, bool) {
 	valTypesBegin := 4 + (n+1)*2
 	valOffsetsBegin := valTypesBegin + n
 	keysBegin := valOffsetsBegin + (n+1)*2
-	keysLength := int(binary.BigEndian.Uint16(b[4+n*2 : 4+n*2+2]))
+	keysLength := int(binary.LittleEndian.Uint16(b[4+n*2 : 4+n*2+2]))
 	valsBegin := keysBegin + keysLength
 
 	i, j := 0, n
@@ -125,7 +125,7 @@ func (a Array) ElemType() Type {
 }
 
 func (a Array) Len() int {
-	return int(binary.BigEndian.Uint16(a[1:3]))
+	return int(binary.LittleEndian.Uint16(a[1:3]))
 }
 
 // At returns the raw bytes for the element at index i.
@@ -143,8 +143,8 @@ func (a Array) At(i int) []byte {
 		startOffsIdx := 3 + i*2
 		endOffsIdx := startOffsIdx + 2
 
-		startOff := int(binary.BigEndian.Uint16(a[startOffsIdx : startOffsIdx+2]))
-		endOff := int(binary.BigEndian.Uint16(a[endOffsIdx : endOffsIdx+2]))
+		startOff := int(binary.LittleEndian.Uint16(a[startOffsIdx : startOffsIdx+2]))
+		endOff := int(binary.LittleEndian.Uint16(a[endOffsIdx : endOffsIdx+2]))
 
 		return a[dataStart+startOff : dataStart+endOff]
 	}
@@ -166,14 +166,14 @@ func (a Array) AtInt64(i int) int64 {
 	if a.ElemType() != TypeInt64 {
 		return 0
 	}
-	return int64(binary.BigEndian.Uint64(a.At(i)))
+	return int64(binary.LittleEndian.Uint64(a.At(i)))
 }
 
 func (a Array) AtFloat64(i int) float64 {
 	if a.ElemType() != TypeFloat64 {
 		return 0
 	}
-	return math.Float64frombits(binary.BigEndian.Uint64(a.At(i)))
+	return math.Float64frombits(binary.LittleEndian.Uint64(a.At(i)))
 }
 
 func (a Array) AtBool(i int) bool {

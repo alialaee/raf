@@ -177,7 +177,7 @@ func (b *Builder) AddInt64(key string, val int64) error {
 	b.appendKey(key)
 
 	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], uint64(val))
+	binary.LittleEndian.PutUint64(buf[:], uint64(val))
 	b.appendValue(TypeInt64, buf[:])
 
 	return nil
@@ -190,7 +190,7 @@ func (b *Builder) AddFloat64(key string, val float64) error {
 	b.appendKey(key)
 
 	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], math.Float64bits(val))
+	binary.LittleEndian.PutUint64(buf[:], math.Float64bits(val))
 	b.appendValue(TypeFloat64, buf[:])
 
 	return nil
@@ -288,12 +288,12 @@ func (b *Builder) addMapArrayFromFn(key string, count int, fn func(i int, inner 
 		if err != nil {
 			return err
 		}
-		binary.BigEndian.PutUint16(buf[:], off)
+		binary.LittleEndian.PutUint16(buf[:], off)
 		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
 		b.arrayBuf = append(b.arrayBuf, b.innerBuildBuf...)
 		off += uint16(len(b.innerBuildBuf))
 	}
-	binary.BigEndian.PutUint16(buf[:], off)
+	binary.LittleEndian.PutUint16(buf[:], off)
 	copy(b.arrayBuf[offsetStart+count*2:], buf[:])
 
 	b.appendValue(TypeArray, b.arrayBuf)
@@ -305,7 +305,7 @@ func (b *Builder) appendArrayHeader(elemType Type, count int) {
 	b.arrayBuf = b.arrayBuf[:0]
 	b.arrayBuf = append(b.arrayBuf, byte(elemType))
 	var buf [2]byte
-	binary.BigEndian.PutUint16(buf[:], uint16(count))
+	binary.LittleEndian.PutUint16(buf[:], uint16(count))
 	b.arrayBuf = append(b.arrayBuf, buf[:]...)
 }
 
@@ -329,7 +329,7 @@ func (b *Builder) AddInt64Array(key string, vals []int64) error {
 
 	var buf [8]byte
 	for _, v := range vals {
-		binary.BigEndian.PutUint64(buf[:], uint64(v))
+		binary.LittleEndian.PutUint64(buf[:], uint64(v))
 		b.arrayBuf = append(b.arrayBuf, buf[:]...)
 	}
 
@@ -347,7 +347,7 @@ func (b *Builder) AddFloat64Array(key string, vals []float64) error {
 
 	var buf [8]byte
 	for _, v := range vals {
-		binary.BigEndian.PutUint64(buf[:], math.Float64bits(v))
+		binary.LittleEndian.PutUint64(buf[:], math.Float64bits(v))
 		b.arrayBuf = append(b.arrayBuf, buf[:]...)
 	}
 
@@ -394,13 +394,13 @@ func (b *Builder) AddMapArray(key string, vals [][]byte) error {
 	var off uint16
 	var buf [2]byte
 	for i, v := range vals {
-		binary.BigEndian.PutUint16(buf[:], off)
+		binary.LittleEndian.PutUint16(buf[:], off)
 		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
 		b.arrayBuf = append(b.arrayBuf, v...)
 		off += uint16(len(v))
 	}
 	// Final sentinel offset
-	binary.BigEndian.PutUint16(buf[:], off)
+	binary.LittleEndian.PutUint16(buf[:], off)
 	copy(b.arrayBuf[offsetStart+len(vals)*2:], buf[:])
 
 	b.appendValue(TypeArray, b.arrayBuf)
@@ -452,7 +452,7 @@ func (b *Builder) Build(dst []byte) ([]byte, error) {
 	cursor += 1
 
 	// 2. Total data size
-	binary.BigEndian.PutUint16(dst[cursor:], uint16(size))
+	binary.LittleEndian.PutUint16(dst[cursor:], uint16(size))
 	cursor += 2
 
 	// 3. Number of pairs (N)
@@ -461,7 +461,7 @@ func (b *Builder) Build(dst []byte) ([]byte, error) {
 
 	// 4. Array of key offsets
 	for _, offset := range b.keyOffsets {
-		binary.BigEndian.PutUint16(dst[cursor:], offset)
+		binary.LittleEndian.PutUint16(dst[cursor:], offset)
 		cursor += 2
 	}
 
@@ -471,7 +471,7 @@ func (b *Builder) Build(dst []byte) ([]byte, error) {
 
 	// 6. Array of value offsets
 	for _, offset := range b.valOffsets {
-		binary.BigEndian.PutUint16(dst[cursor:], offset)
+		binary.LittleEndian.PutUint16(dst[cursor:], offset)
 		cursor += 2
 	}
 
@@ -505,13 +505,13 @@ func addStringArray[T interface{ string | []byte }](b *Builder, key string, vals
 	var off uint16
 	var buf [2]byte
 	for i, v := range vals {
-		binary.BigEndian.PutUint16(buf[:], off)
+		binary.LittleEndian.PutUint16(buf[:], off)
 		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
 		b.arrayBuf = append(b.arrayBuf, v...)
 		off += uint16(len(v))
 	}
 	// Final sentinel offset
-	binary.BigEndian.PutUint16(buf[:], off)
+	binary.LittleEndian.PutUint16(buf[:], off)
 	copy(b.arrayBuf[offsetStart+len(vals)*2:], buf[:])
 
 	b.appendValue(TypeArray, b.arrayBuf)

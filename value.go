@@ -31,14 +31,14 @@ func (v Value) Int64() int64 {
 	if v.Type != TypeInt64 || len(v.Data) != 8 {
 		return 0
 	}
-	return int64(binary.BigEndian.Uint64(v.Data))
+	return int64(binary.LittleEndian.Uint64(v.Data))
 }
 
 func (v Value) Float64() float64 {
 	if v.Type != TypeFloat64 || len(v.Data) != 8 {
 		return 0
 	}
-	return math.Float64frombits(binary.BigEndian.Uint64(v.Data))
+	return math.Float64frombits(binary.LittleEndian.Uint64(v.Data))
 }
 
 func (v Value) Bool() bool {

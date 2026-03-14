@@ -277,7 +277,7 @@ func TestArrayTypes(t *testing.T) {
 	}
 	wantFloats := []float64{1.1, 2.2, 3.3}
 	for i, w := range wantFloats {
-		got := math.Float64frombits(binary.BigEndian.Uint64(arr.At(i)))
+		got := math.Float64frombits(binary.LittleEndian.Uint64(arr.At(i)))
 		if got != w {
 			t.Errorf("Float64[%d]: got %v, want %v", i, got, w)
 		}
@@ -294,7 +294,7 @@ func TestArrayTypes(t *testing.T) {
 	}
 	wantInts := []int64{10, -20, 30}
 	for i, w := range wantInts {
-		got := int64(binary.BigEndian.Uint64(arr.At(i)))
+		got := int64(binary.LittleEndian.Uint64(arr.At(i)))
 		if got != w {
 			t.Errorf("Int64[%d]: got %v, want %v", i, got, w)
 		}
