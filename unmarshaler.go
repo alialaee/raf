@@ -1,4 +1,4 @@
-package r2
+package raf
 
 import (
 	"bytes"
@@ -9,23 +9,15 @@ import (
 	"strings"
 	"sync"
 	"unsafe"
-
-	"github.com/alialaee/raf"
 )
-
-var defaultUnmarshaler = NewUnmarshaler()
 
 var (
 	ErrInvalidRAFData = errors.New("invalid RAF data")
 )
 
-func Unmarshal(data []byte, v any) error {
-	return defaultUnmarshaler.Unmarshal(data, v)
-}
-
 type ErrTypeMismatch struct {
 	Key          string
-	ExpectedType raf.Type
+	ExpectedType Type
 	ActualType   reflect.Kind
 	Inner        error
 }
@@ -58,7 +50,7 @@ func (e *ErrTypeMismatch) Is(target error) bool {
 	return e.Key == t.Key && e.ExpectedType == t.ExpectedType && e.ActualType == t.ActualType
 }
 
-func newErrTypeMismatch(key string, expected raf.Type, actual reflect.Kind) *ErrTypeMismatch {
+func newErrTypeMismatch(key string, expected Type, actual reflect.Kind) *ErrTypeMismatch {
 	return &ErrTypeMismatch{
 		Key:          key,
 		ExpectedType: expected,
@@ -93,7 +85,7 @@ type unmarshalOP struct {
 }
 
 func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
-	block := raf.Block(data)
+	block := Block(data)
 	if !block.Valid() {
 		return ErrInvalidRAFData
 	}
@@ -116,7 +108,7 @@ func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
 	)
 }
 
-func unmarshalBlockToMap(block raf.Block) map[string]any {
+func unmarshalBlockToMap(block Block) map[string]any {
 	n := block.NumPairs()
 	m := make(map[string]any, n)
 	for i := range n {
@@ -125,58 +117,58 @@ func unmarshalBlockToMap(block raf.Block) map[string]any {
 	return m
 }
 
-func unmarshalValueToAny(val raf.Value) any {
+func unmarshalValueToAny(val Value) any {
 	switch val.Type {
-	case raf.TypeString:
+	case TypeString:
 		return val.String()
-	case raf.TypeInt64:
+	case TypeInt64:
 		return val.Int64()
-	case raf.TypeFloat64:
+	case TypeFloat64:
 		return val.Float64()
-	case raf.TypeBool:
+	case TypeBool:
 		return val.Bool()
-	case raf.TypeNull:
+	case TypeNull:
 		return nil
-	case raf.TypeMap:
+	case TypeMap:
 		return unmarshalBlockToMap(val.Map())
-	case raf.TypeArray:
+	case TypeArray:
 		arr := val.Array()
 		n := arr.Len()
 		switch arr.ElemType() {
-		case raf.TypeString:
+		case TypeString:
 			s := make([]string, n)
 			for i := range n {
 				s[i] = string(arr.At(i))
 			}
 			return s
-		case raf.TypeInt64:
+		case TypeInt64:
 			s := make([]int64, n)
 			for i := range n {
 				s[i] = arr.AtInt64(i)
 			}
 			return s
-		case raf.TypeFloat64:
+		case TypeFloat64:
 			s := make([]float64, n)
 			for i := range n {
 				s[i] = arr.AtFloat64(i)
 			}
 			return s
-		case raf.TypeBool:
+		case TypeBool:
 			s := make([]bool, n)
 			for i := range n {
 				s[i] = arr.AtBool(i)
 			}
 			return s
-		case raf.TypeMap:
+		case TypeMap:
 			s := make([]map[string]any, n)
 			for i := range n {
-				s[i] = unmarshalBlockToMap(raf.NewBlock(arr.At(i)))
+				s[i] = unmarshalBlockToMap(NewBlock(arr.At(i)))
 			}
 			return s
 		default:
 			s := make([]any, n)
 			for i := range n {
-				s[i] = unmarshalValueToAny(raf.Value{Type: arr.ElemType(), Data: arr.At(i)})
+				s[i] = unmarshalValueToAny(Value{Type: arr.ElemType(), Data: arr.At(i)})
 			}
 			return s
 		}
@@ -230,28 +222,28 @@ func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
 	return ops
 }
 
-func typeCompatible(valType raf.Type, targetKind reflect.Kind) bool {
+func typeCompatible(valType Type, targetKind reflect.Kind) bool {
 	switch valType {
-	case raf.TypeNull:
+	case TypeNull:
 		return true
-	case raf.TypeString:
+	case TypeString:
 		return targetKind == reflect.String
-	case raf.TypeInt64:
+	case TypeInt64:
 		return targetKind >= reflect.Int && targetKind <= reflect.Uint64
-	case raf.TypeFloat64:
+	case TypeFloat64:
 		return targetKind == reflect.Float32 || targetKind == reflect.Float64
-	case raf.TypeBool:
+	case TypeBool:
 		return targetKind == reflect.Bool
-	case raf.TypeMap:
+	case TypeMap:
 		return targetKind == reflect.Struct
-	case raf.TypeArray:
+	case TypeArray:
 		return targetKind == reflect.Slice
 	default:
 		return false
 	}
 }
 
-func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data raf.Block, base unsafe.Pointer) error {
+func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data Block, base unsafe.Pointer) error {
 	for dataI, opsI := 0, 0; dataI < data.NumPairs() && opsI < len(ops); {
 		op := ops[opsI]
 		cmp := bytes.Compare(data.KeyAt(dataI), op.rafName)
@@ -368,7 +360,7 @@ func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data raf.Block, base unsafe.P
 				case reflect.String:
 					*(*string)(elemPtr) = string(arr.At(i))
 				case reflect.Struct:
-					if err := u.unmarshal(op.nested, raf.NewBlock(arr.At(i)), elemPtr); err != nil {
+					if err := u.unmarshal(op.nested, NewBlock(arr.At(i)), elemPtr); err != nil {
 						return err
 					}
 				default:

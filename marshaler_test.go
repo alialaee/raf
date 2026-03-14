@@ -1,8 +1,11 @@
-package raf
+package raf_test
 
 import (
+	"math"
 	"reflect"
 	"testing"
+
+	"github.com/alialaee/raf"
 )
 
 type ComplexStruct struct {
@@ -101,11 +104,11 @@ func makeComplexStruct() ComplexStruct {
 		Int32s: []int32{-100000, -50000, 0, 50000, 100000},
 		Int64s: []int64{-10000000000, -5000000000, 0, 5000000000, 10000000000},
 
-		// Uints:   []uint{1000, 101, 0, 200, 500},
-		// Uint8s:  []uint8{100, 50, 0, 50, 100},
-		// Uint16s: []uint16{1000, 500, 0, 500, 1000},
-		// Uint32s: []uint32{100000, 50000, 0, 50000, 100000},
-		// Uint64s: []uint64{10000000000, 5000000000, 0, 5000000000, 10000000000},
+		Uints:   []uint{1000, 101, 0, 200, 500},
+		Uint8s:  []uint8{100, 50, 0, 50, 100},
+		Uint16s: []uint16{1000, 500, 0, 500, 1000},
+		Uint32s: []uint32{100000, 50000, 0, 50000, 100000},
+		Uint64s: []uint64{10000000000, 5000000000, 0, 5000000000, 10000000000},
 
 		Float32s: []float32{3.14, -2.71},
 		Float64s: []float64{2.71828, -3.14},
@@ -135,13 +138,13 @@ func testMarshalUnmarshal_WithSelf[T any](t *testing.T, original T) {
 
 func testMarshalUnmarshal[T any, V any](t *testing.T, original T, expected V) {
 	t.Helper()
-	data, err := Marshal(original)
+	data, err := raf.Marshal(original)
 	if err != nil {
 		t.Fatalf("failed to marshal: %v", err)
 	}
 
 	var decoded V
-	if err := Unmarshal(data, &decoded); err != nil {
+	if err := raf.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
@@ -231,7 +234,7 @@ func TestEmptyToNil(t *testing.T) {
 
 func TestUnmarshalMap(t *testing.T) {
 	complexStruct := makeComplexStruct()
-	data, err := Marshal(complexStruct)
+	data, err := raf.Marshal(complexStruct)
 	if err != nil {
 		t.Fatalf("failed to marshal: %v", err)
 	}
@@ -258,43 +261,43 @@ func TestUnmarshalMap(t *testing.T) {
 		"int_pointer":    int64(0), // TODO fix
 		"string_pointer": "",
 
-		"strings": []any{"foo", "bar", "baz"},
-		"bools":   []any{true, false, true}, // TODO fix
+		"strings": []string{"foo", "bar", "baz"},
+		"bools":   []bool{true, false, true}, // TODO fix
 
-		"ints":   []any{int64(-1000), int64(-101), int64(0), int64(200), int64(500)},
-		"int8s":  []any{int64(-100), int64(-50), int64(0), int64(50), int64(100)},
-		"int16s": []any{int64(-1000), int64(-500), int64(0), int64(500), int64(1000)},
-		"int32s": []any{int64(-100000), int64(-50000), int64(0), int64(50000), int64(100000)},
-		"int64s": []any{int64(-10000000000), int64(-5000000000), int64(0), int64(5000000000), int64(10000000000)},
+		"ints":   []int64{-1000, -101, 0, 200, 500},
+		"int8s":  []int64{-100, -50, 0, 50, 100},
+		"int16s": []int64{-1000, -500, 0, 500, 1000},
+		"int32s": []int64{-100000, -50000, 0, 50000, 100000},
+		"int64s": []int64{-10000000000, -5000000000, 0, 5000000000, 10000000000},
 
-		// "uints":   []uint{1000, 101, 0, 200, 500}, // TODO fix
-		// "uint8s":  []uint8{100, 50, 0, 50, 100},
-		// "uint16s": []uint16{1000, 500, 0, 500, 1000},
-		// "uint32s": []uint32{100000, 50000, 0, 50000, 100000},
-		// "uint64s": []uint64{10000000000, 5000000000, 0, 5000000000, 10000000000},
+		"uints":   []int64{1000, 101, 0, 200, 500}, // TODO fix
+		"uint8s":  []int64{100, 50, 0, 50, 100},
+		"uint16s": []int64{1000, 500, 0, 500, 1000},
+		"uint32s": []int64{100000, 50000, 0, 50000, 100000},
+		"uint64s": []int64{10000000000, 5000000000, 0, 5000000000, 10000000000},
 
-		"floats32": []any{float64(float32(3.14)), float64(float32(-2.71))},
-		"floats64": []any{float64(2.71828), float64(-3.14)},
+		"floats32": []float64{float64(float32(3.14)), float64(float32(-2.71))},
+		"floats64": []float64{2.71828, -3.14},
 
 		"inner_struct": map[string]any{
 			"field1": "inner",
 			"field2": int64(123),
 			"inner_inner": map[string]any{
-				"strings": []any{"innerfoo", "innerbar"},
-				"ints":    []any{int64(1), int64(2), int64(3)},
+				"strings": []string{"innerfoo", "innerbar"},
+				"ints":    []int64{1, 2, 3},
 			},
 		},
 
-		"pairs": []any{
-			map[string]any{"a": "first", "b": "pair"},
-			map[string]any{"a": "second", "b": "pair"},
+		"pairs": []map[string]any{
+			{"a": "first", "b": "pair"},
+			{"a": "second", "b": "pair"},
 		},
 
 		"pair_pointer": map[string]any{"a": "pointer", "b": "pair"},
 	}
 
 	var got map[string]any
-	if err := Unmarshal(data, &got); err != nil {
+	if err := raf.Unmarshal(data, &got); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
@@ -308,4 +311,252 @@ func TestUnmarshalMap(t *testing.T) {
 			t.Fatalf("unexpected value for key %q: got (%T)%+v, want (%T)%+v", k, gotVal, gotVal, v, v)
 		}
 	}
+}
+
+func TestMarshalAndUnmarshalMap(t *testing.T) {
+	data := map[string]any{
+		"string": "hello",
+		"bool":   true,
+
+		"int":   int64(-42),
+		"int8":  int64(-8),
+		"int16": int64(-16),
+		"int32": int64(-32),
+		"int64": int64(-64),
+
+		"uint":   int64(42),
+		"uint8":  int64(8),
+		"uint16": int64(16),
+		"uint32": int64(32),
+		"uint64": int64(64),
+
+		"float32": float64(float32(3.14)),
+		"float64": float64(2.71828),
+
+		"int_pointer":    int64(0), // TODO fix
+		"string_pointer": "",
+
+		"strings": []string{"foo", "bar", "baz"},
+		"bools":   []bool{true, false, true}, // TODO fix
+
+		"ints":   []int64{-1000, -101, 0, 200, 500},
+		"int8s":  []int64{-100, -50, 0, 50, 100},
+		"int16s": []int64{-1000, -500, 0, 500, 1000},
+		"int32s": []int64{-100000, -50000, 0, 50000, 100000},
+		"int64s": []int64{-10000000000, -5000000000, 0, 5000000000, 10000000000},
+
+		"uints":   []int64{1000, 101, 0, 200, 500}, // TODO fix
+		"uint8s":  []int64{100, 50, 0, 50, 100},
+		"uint16s": []int64{1000, 500, 0, 500, 1000},
+		"uint32s": []int64{100000, 50000, 0, 50000, 100000},
+		"uint64s": []int64{10000000000, 5000000000, 0, 5000000000, 10000000000},
+
+		"floats32": []float64{float64(float32(3.14)), float64(float32(-2.71))},
+		"floats64": []float64{2.71828, -3.14},
+
+		"inner_struct": map[string]any{
+			"field1": "inner",
+			"field2": int64(123),
+			"inner_inner": map[string]any{
+				"strings": []string{"innerfoo", "innerbar"},
+				"ints":    []int64{1, 2, 3},
+			},
+		},
+
+		"pairs": []map[string]any{
+			{"a": "first", "b": "pair"},
+			{"a": "second", "b": "pair"},
+		},
+
+		"pair_pointer": map[string]any{"a": "pointer", "b": "pair"},
+	}
+
+	marshaled, err := raf.Marshal(data)
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var unmarshaled map[string]any
+	if err := raf.Unmarshal(marshaled, &unmarshaled); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	for k, v := range data {
+		gotVal, ok := unmarshaled[k]
+		if !ok {
+			t.Fatalf("missing key in result: %s", k)
+		}
+
+		if !reflect.DeepEqual(gotVal, v) {
+			t.Fatalf("unexpected value for key %q: got (%T)%+v, want (%T)%+v", k, gotVal, gotVal, v, v)
+		}
+	}
+}
+
+func TestUnmarshal_Failed_InvalidData(t *testing.T) {
+	type A struct {
+		Num int `raf:"num"`
+	}
+
+	data := []byte{0x01, 0x00, 0x01, 0x01, 0x00, 0x00}
+
+	var a A
+	err := raf.Unmarshal(data, &a)
+	if err == nil {
+		t.Fatal("expected error but got nil")
+	}
+
+	expectedErr := "invalid RAF data"
+	if err.Error() != expectedErr {
+		t.Fatalf("unexpected error message: got %q, want %q", err.Error(), expectedErr)
+	}
+}
+
+func TestUnmarshal_Failed_TypeMismatch(t *testing.T) {
+	type A struct {
+		Num int `raf:"num"`
+	}
+
+	type B struct {
+		Num string `raf:"num"`
+	}
+
+	data, err := raf.Marshal(A{Num: 42})
+	if err != nil {
+		t.Fatalf("failed to marshal: %v", err)
+	}
+
+	var b B
+	err = raf.Unmarshal(data, &b)
+	if err == nil {
+		t.Fatal("expected error but got nil")
+	}
+
+	expectedErr := "type mismatch for key num: expected int64, got string"
+	if err.Error() != expectedErr {
+		t.Fatalf("unexpected error message: got %q, want %q", err.Error(), expectedErr)
+	}
+}
+
+func TestMinMaxValues(t *testing.T) {
+	type MinInts struct {
+		Int8  int8  `raf:"int8"`
+		Int16 int16 `raf:"int16"`
+		Int32 int32 `raf:"int32"`
+		Int64 int64 `raf:"int64"`
+	}
+
+	testMarshalUnmarshal_WithSelf(t, MinInts{
+		Int8:  math.MinInt8,
+		Int16: math.MinInt16,
+		Int32: math.MinInt32,
+		Int64: math.MinInt64,
+	})
+
+	type MaxInts struct {
+		Int8   int8   `raf:"int8"`
+		Int16  int16  `raf:"int16"`
+		Int32  int32  `raf:"int32"`
+		Int64  int64  `raf:"int64"`
+		Uint8  uint8  `raf:"uint8"`
+		Uint16 uint16 `raf:"uint16"`
+		Uint32 uint32 `raf:"uint32"`
+		Uint64 uint64 `raf:"uint64"`
+	}
+
+	testMarshalUnmarshal_WithSelf(t, MaxInts{
+		Int8:   math.MaxInt8,
+		Int16:  math.MaxInt16,
+		Int32:  math.MaxInt32,
+		Int64:  math.MaxInt64,
+		Uint8:  math.MaxUint8,
+		Uint16: math.MaxUint16,
+		Uint32: math.MaxUint32,
+		Uint64: math.MaxUint64,
+	})
+}
+
+func TestWithoutTags(t *testing.T) {
+	type NoTags struct {
+		Num  int
+		Str  string
+		Bool bool
+		Num2 int
+	}
+
+	type WithTags struct {
+		Num  int    `raf:"num"`
+		Str  string `raf:"str"`
+		Bool bool   `raf:"bool"`
+		Num2 int    `raf:"-"`
+	}
+
+	testMarshalUnmarshal(t, WithTags{
+		Num:  42,
+		Str:  "Hello",
+		Bool: true,
+		Num2: 100,
+	}, NoTags{
+		Num:  42,
+		Str:  "Hello",
+		Bool: true,
+		Num2: 0,
+	})
+}
+
+func TestUnexportedFields(t *testing.T) {
+	type WithUnexported struct {
+		Exported   string `raf:"exported"`
+		unexported string `raf:"unexported"`
+	}
+
+	testMarshalUnmarshal(t, WithUnexported{
+		Exported:   "This is exported",
+		unexported: "This is unexported",
+	},
+		WithUnexported{
+			Exported:   "This is exported",
+			unexported: "",
+		},
+	)
+}
+
+func TestMissingFields(t *testing.T) {
+	type A struct {
+		Num1  int     `raf:"num1"`
+		Str   string  `raf:"str"`
+		Num2  int     `raf:"num2"`
+		Bool  bool    `raf:"bool"`
+		Float float64 `raf:"float"`
+	}
+
+	type B struct {
+		Num1 int  `raf:"num1"`
+		Num2 int  `raf:"num2"`
+		Bool bool `raf:"bool"`
+	}
+
+	testMarshalUnmarshal(t, A{
+		Num1:  42,
+		Str:   "Hello",
+		Num2:  100,
+		Bool:  true,
+		Float: 3.14,
+	}, B{
+		Num1: 42,
+		Num2: 100,
+		Bool: true,
+	})
+
+	testMarshalUnmarshal(t, B{
+		Num1: 42,
+		Num2: 100,
+		Bool: true,
+	}, A{
+		Num1:  42,
+		Str:   "",
+		Num2:  100,
+		Bool:  true,
+		Float: 0,
+	})
 }

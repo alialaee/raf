@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
-	"strings"
 	"sync"
 )
 
@@ -26,7 +25,7 @@ func computeStructFields(rt reflect.Type) *structFields {
 	byName := make(map[string]int, n)
 	for i := range n {
 		f := rt.Field(i)
-		skip, name := fieldName(f)
+		name, skip := fieldName(f)
 		if skip {
 			continue
 		}
@@ -161,21 +160,6 @@ func (m *Marshaler) marshalMapOrStruct(builder *Builder, rv reflect.Value) error
 	return nil
 }
 
-func fieldName(f reflect.StructField) (skip bool, name string) {
-	tag := f.Tag.Get("raf")
-	if !f.IsExported() {
-		return true, ""
-	}
-	if tag == "-" {
-		return true, ""
-	}
-	name = tag
-	if name == "" {
-		name = strings.ToLower(f.Name)
-	}
-	return false, name
-}
-
 func (m *Marshaler) marshalArray(builder *Builder, rv reflect.Value, key []byte) error {
 	if rv.Len() == 0 {
 		return builder.AddStringArray(key, nil)
@@ -236,214 +220,4 @@ func indirect(v reflect.Value) reflect.Value {
 		v = v.Elem()
 	}
 	return v
-}
-
-// Unmarshaler decodes RAF data into Go values, caching reflect metadata for struct types.
-// A zero-value Unmarshaler is ready to use.
-type Unmarshaler struct {
-	cache sync.Map // reflect.Type to *structFields
-}
-
-func (u *Unmarshaler) getStructFields(rt reflect.Type) *structFields {
-	if v, ok := u.cache.Load(rt); ok {
-		return v.(*structFields)
-	}
-	sf := computeStructFields(rt)
-	v, _ := u.cache.LoadOrStore(rt, sf)
-	return v.(*structFields)
-}
-
-// Unmarshal parses the RAF-encoded data and stores the result in the value pointed to by v.
-func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
-	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return errors.New("raf: Unmarshal(non-pointer or nil)")
-	}
-	rv = rv.Elem()
-
-	block := NewBlock(data)
-	if !block.Valid() {
-		return errors.New("raf: invalid block structure")
-	}
-
-	return u.unmarshalMapOrStruct(block, rv)
-}
-
-func (u *Unmarshaler) unmarshalMapOrStruct(block Block, rv reflect.Value) error {
-	for rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
-			rv.Set(reflect.New(rv.Type().Elem()))
-		}
-		rv = rv.Elem()
-	}
-
-	if rv.Kind() == reflect.Interface {
-		m := make(map[string]any)
-		for i := 0; i < block.NumPairs(); i++ {
-			k := block.KeyAt(i)
-			v := block.ValueAt(i)
-			val, err := valueToInterface(v)
-			if err != nil {
-				return err
-			}
-			m[string(k)] = val
-		}
-		rv.Set(reflect.ValueOf(m))
-		return nil
-	}
-
-	if rv.Kind() == reflect.Map {
-		if rv.Type().Key().Kind() != reflect.String {
-			return errors.New("raf: map key must be string")
-		}
-		if rv.IsNil() {
-			rv.Set(reflect.MakeMap(rv.Type()))
-		}
-		elemType := rv.Type().Elem()
-		for i := 0; i < block.NumPairs(); i++ {
-			elemPtr := reflect.New(elemType)
-			if err := u.unmarshalValue(block.ValueAt(i), elemPtr.Elem()); err != nil {
-				return err
-			}
-			rv.SetMapIndex(reflect.ValueOf(string(block.KeyAt(i))), elemPtr.Elem())
-		}
-		return nil
-	}
-
-	if rv.Kind() == reflect.Struct {
-		sf := u.getStructFields(rv.Type())
-
-		for i := 0; i < block.NumPairs(); i++ {
-			if fieldIdx, ok := sf.byName[string(block.KeyAt(i))]; ok {
-				if err := u.unmarshalValue(block.ValueAt(i), rv.Field(fieldIdx)); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-
-	return fmt.Errorf("raf: unsupported type %s to unmarshal into from map", rv.Type().String())
-}
-
-func (u *Unmarshaler) unmarshalValue(val Value, rv reflect.Value) error {
-	for rv.Kind() == reflect.Pointer {
-		if val.Type == TypeNull {
-			rv.SetZero()
-			return nil
-		}
-		if rv.IsNil() {
-			rv.Set(reflect.New(rv.Type().Elem()))
-		}
-		rv = rv.Elem()
-	}
-
-	if val.Type == TypeNull {
-		rv.SetZero()
-		return nil
-	}
-
-	if rv.Kind() == reflect.Interface {
-		v, err := valueToInterface(val)
-		if err != nil {
-			return err
-		}
-		if v != nil {
-			rv.Set(reflect.ValueOf(v))
-		} else {
-			rv.SetZero()
-		}
-		return nil
-	}
-
-	switch val.Type {
-	case TypeString:
-		if rv.Kind() == reflect.String {
-			rv.SetString(val.String())
-		} else if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
-			rv.SetBytes(append([]byte(nil), val.Data...))
-		} else {
-			return fmt.Errorf("raf: cannot unmarshal string into %s", rv.Type())
-		}
-	case TypeInt64:
-		switch rv.Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			rv.SetInt(val.Int64())
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			rv.SetUint(uint64(val.Int64()))
-		case reflect.Float32, reflect.Float64:
-			rv.SetFloat(float64(val.Int64()))
-		default:
-			return fmt.Errorf("raf: cannot unmarshal int64 into %s", rv.Type())
-		}
-	case TypeFloat64:
-		switch rv.Kind() {
-		case reflect.Float32, reflect.Float64:
-			rv.SetFloat(val.Float64())
-		default:
-			return fmt.Errorf("raf: cannot unmarshal float64 into %s", rv.Type())
-		}
-	case TypeBool:
-		if rv.Kind() == reflect.Bool {
-			rv.SetBool(val.Bool())
-		} else {
-			return fmt.Errorf("raf: cannot unmarshal bool into %s", rv.Type())
-		}
-	case TypeMap:
-		return u.unmarshalMapOrStruct(val.Map(), rv)
-	case TypeArray:
-		arr := val.Array()
-		if rv.Kind() == reflect.Slice {
-			rv.Set(reflect.MakeSlice(rv.Type(), arr.Len(), arr.Len()))
-			for i := 0; i < arr.Len(); i++ {
-				elemVal := Value{Type: arr.ElemType(), Data: arr.At(i)}
-				if err := u.unmarshalValue(elemVal, rv.Index(i)); err != nil {
-					return err
-				}
-			}
-		} else {
-			return fmt.Errorf("raf: cannot unmarshal array into %s", rv.Type())
-		}
-	}
-	return nil
-}
-
-func valueToInterface(val Value) (any, error) {
-	switch val.Type {
-	case TypeString:
-		return val.String(), nil
-	case TypeInt64:
-		return val.Int64(), nil
-	case TypeFloat64:
-		return val.Float64(), nil
-	case TypeBool:
-		return val.Bool(), nil
-	case TypeNull:
-		return nil, nil
-	case TypeMap:
-		block := val.Map()
-		m := make(map[string]any)
-		for i := 0; i < block.NumPairs(); i++ {
-			innerVal, err := valueToInterface(block.ValueAt(i))
-			if err != nil {
-				return nil, err
-			}
-			m[string(block.KeyAt(i))] = innerVal
-		}
-		return m, nil
-	case TypeArray:
-		arr := val.Array()
-		var slice []any
-		for i := 0; i < arr.Len(); i++ {
-			elemVal := Value{Type: arr.ElemType(), Data: arr.At(i)}
-			v, err := valueToInterface(elemVal)
-			if err != nil {
-				return nil, err
-			}
-			slice = append(slice, v)
-		}
-		return slice, nil
-	default:
-		return nil, fmt.Errorf("raf: unknown value type %d", val.Type)
-	}
 }
