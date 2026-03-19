@@ -53,6 +53,7 @@ const (
 
 var (
 	ErrValueCountMismatch = errors.New("number of values added does not match number of keys")
+	ErrArrayCountMismatch = errors.New("number of array elements added does not match expected count")
 )
 
 const (
@@ -73,6 +74,9 @@ type Builder struct {
 	lastValOffset   int
 	valueIndex      int
 	keyCount        int
+
+	// Cache for building arrays
+	arrayBuilder *ArrayBuilder
 }
 
 func NewBuilder(buf []byte) *Builder {
@@ -191,12 +195,27 @@ func (b *Builder) AddBool(value bool) {
 	b.lastValOffset++
 }
 
+func (b *Builder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder)) error {
+	if b.arrayBuilder == nil {
+		b.arrayBuilder = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
+	} else {
+		b.arrayBuilder.Reset(elemType, count)
+	}
+	fn(b.arrayBuilder)
+	arr, err := b.arrayBuilder.Build()
+	if err != nil {
+		return err
+	}
+	b.AddRaw(arr)
+	return nil
+}
+
 func (b *Builder) Build() ([]byte, error) {
 	if b.valueIndex != b.keyCount {
 		return nil, fmt.Errorf("%w: expected %d, got %d", ErrValueCountMismatch, b.keyCount, b.valueIndex)
 	}
 
-	// Write the final value offset (end sentinel)
+	// Write the final value offset
 	binary.LittleEndian.PutUint32(b.buf[b.valOffsetsStart+b.keyCount*hValOffsetSize:], uint32(b.lastValOffset))
 
 	// Update total size
@@ -215,6 +234,100 @@ func (b *Builder) AddRaw(value []byte) {
 	b.lastValOffset += len(value)
 }
 
-type ArrayBulder struct {
-	buf []byte
+const (
+	aTypeSize   = 1 // u8
+	aCountSize  = 2 // u16
+	aOffsetSize = 2 // u16
+)
+
+type ArrayBuilder struct {
+	buf          []byte
+	elemType     Type
+	count        int
+	valueIndex   int
+	isDynamic    bool
+	offsetsStart int
+	lastOffset   int
+}
+
+func NewArrayBuilder(buf []byte, elemType Type, count int) *ArrayBuilder {
+	ab := &ArrayBuilder{buf: buf}
+	ab.Reset(elemType, count)
+	return ab
+}
+
+func (a *ArrayBuilder) Reset(elemType Type, count int) {
+	a.buf = a.buf[:0]
+	a.elemType = elemType
+	a.count = count
+	a.valueIndex = 0
+	a.lastOffset = 0
+	a.isDynamic = elemType == TypeString || elemType == TypeArray || elemType == TypeMap
+
+	headerSize := aTypeSize + aCountSize
+	if a.isDynamic {
+		headerSize += (count + 1) * aOffsetSize
+	}
+
+	if cap(a.buf) < headerSize {
+		a.buf = make([]byte, headerSize)
+	} else {
+		a.buf = a.buf[:headerSize]
+	}
+
+	a.buf[0] = byte(elemType)
+	binary.LittleEndian.PutUint16(a.buf[aTypeSize:], uint16(count))
+
+	if a.isDynamic {
+		a.offsetsStart = aTypeSize + aCountSize
+	}
+}
+
+func (a *ArrayBuilder) AddString(value string) {
+	binary.LittleEndian.PutUint16(a.buf[a.offsetsStart+a.valueIndex*aOffsetSize:], uint16(a.lastOffset))
+	a.valueIndex++
+	a.buf = append(a.buf, value...)
+	a.lastOffset += len(value)
+}
+
+func (a *ArrayBuilder) AddInt64(value int64) {
+	a.valueIndex++
+	pos := len(a.buf)
+	a.buf = append(a.buf, 0, 0, 0, 0, 0, 0, 0, 0)
+	binary.LittleEndian.PutUint64(a.buf[pos:], uint64(value))
+}
+
+func (a *ArrayBuilder) AddFloat64(value float64) {
+	a.valueIndex++
+	pos := len(a.buf)
+	a.buf = append(a.buf, 0, 0, 0, 0, 0, 0, 0, 0)
+	binary.LittleEndian.PutUint64(a.buf[pos:], math.Float64bits(value))
+}
+
+func (a *ArrayBuilder) AddBool(value bool) {
+	a.valueIndex++
+	if value {
+		a.buf = append(a.buf, 1)
+	} else {
+		a.buf = append(a.buf, 0)
+	}
+}
+
+func (a *ArrayBuilder) AddRaw(value []byte) {
+	if a.isDynamic {
+		binary.LittleEndian.PutUint16(a.buf[a.offsetsStart+a.valueIndex*aOffsetSize:], uint16(a.lastOffset))
+		a.lastOffset += len(value)
+	}
+	a.valueIndex++
+	a.buf = append(a.buf, value...)
+}
+
+func (a *ArrayBuilder) Build() ([]byte, error) {
+	if a.valueIndex != a.count {
+		return nil, fmt.Errorf("%w: expected %d elements, got %d", ErrArrayCountMismatch, a.count, a.valueIndex)
+	}
+	if a.isDynamic {
+		binary.LittleEndian.PutUint16(a.buf[a.offsetsStart+a.count*aOffsetSize:], uint16(a.lastOffset))
+	}
+	return a.buf, nil
 }
