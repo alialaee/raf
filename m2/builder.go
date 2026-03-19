@@ -75,8 +75,9 @@ type Builder struct {
 	valueIndex      int
 	keyCount        int
 
-	// Cache for building arrays
-	arrayBuilder *ArrayBuilder
+	// Cache for builders
+	cachedArrayBuilder *ArrayBuilder
+	cachedBuilder      *Builder
 }
 
 func NewBuilder(buf []byte) *Builder {
@@ -196,17 +197,34 @@ func (b *Builder) AddBool(value bool) {
 }
 
 func (b *Builder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder)) error {
-	if b.arrayBuilder == nil {
-		b.arrayBuilder = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
+	if b.cachedArrayBuilder == nil {
+		b.cachedArrayBuilder = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
 	} else {
-		b.arrayBuilder.Reset(elemType, count)
+		b.cachedArrayBuilder.Reset(elemType, count)
 	}
-	fn(b.arrayBuilder)
-	arr, err := b.arrayBuilder.Build()
+	fn(b.cachedArrayBuilder)
+	arr, err := b.cachedArrayBuilder.Build()
 	if err != nil {
 		return err
 	}
 	b.AddRaw(arr)
+	return nil
+}
+
+func (b *Builder) AddBuilderFn(fn func(mb *Builder) error) error {
+	if b.cachedBuilder == nil {
+		b.cachedBuilder = NewBuilder(make([]byte, 0, 256))
+	} else {
+		b.cachedBuilder.Reset()
+	}
+	if err := fn(b.cachedBuilder); err != nil {
+		return err
+	}
+	m, err := b.cachedBuilder.Build()
+	if err != nil {
+		return err
+	}
+	b.AddRaw(m)
 	return nil
 }
 

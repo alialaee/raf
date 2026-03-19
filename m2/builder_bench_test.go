@@ -101,11 +101,12 @@ func BenchmarkArrayBuilder_String(b *testing.B) {
 	}
 }
 
-func BenchmarkBuild_WithArray(b *testing.B) {
+func BenchmarkBuild_WithArrayAndMap(b *testing.B) {
 	keyTypes := []KeyType{
 		{Name: "name", Type: TypeString},
 		{Name: "age", Type: TypeInt64},
 		{Name: "tags", Type: TypeArray},
+		{Name: "metadata", Type: TypeMap},
 	}
 
 	buf := make([]byte, 0, 1024)
@@ -123,6 +124,19 @@ func BenchmarkBuild_WithArray(b *testing.B) {
 			ab.AddString("go")
 			ab.AddString("rust")
 			ab.AddString("zig")
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		err = builder.AddBuilderFn(func(mb *Builder) error {
+			mb.AddKeys([]KeyType{
+				{Name: "score", Type: TypeFloat64},
+				{Name: "active", Type: TypeBool},
+			}...)
+			mb.AddFloat64(95.5)
+			mb.AddBool(true)
+			return nil
 		})
 		if err != nil {
 			b.Fatal(err)
