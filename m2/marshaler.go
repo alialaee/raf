@@ -23,11 +23,25 @@ type valueAdder interface {
 type reflectField struct {
 	index      int
 	isNullable bool
+	kind       reflect.Kind
 }
 
 type structFields struct {
 	rafFields     []KeyType
 	reflectFields []reflectField
+}
+
+func (sf *structFields) Len() int {
+	return len(sf.rafFields)
+}
+
+func (sf *structFields) Swap(i, j int) {
+	sf.rafFields[i], sf.rafFields[j] = sf.rafFields[j], sf.rafFields[i]
+	sf.reflectFields[i], sf.reflectFields[j] = sf.reflectFields[j], sf.reflectFields[i]
+}
+
+func (sf *structFields) Less(i, j int) bool {
+	return sf.rafFields[i].Name < sf.rafFields[j].Name
 }
 
 func computeStructFields(rt reflect.Type) (*structFields, error) {
@@ -48,18 +62,13 @@ func computeStructFields(rt reflect.Type) (*structFields, error) {
 		}
 
 		rafFields = append(rafFields, KeyType{Name: name, Type: rafType})
-		reflectFields = append(reflectFields, reflectField{index: i, isNullable: isNullableType(f.Type)})
+		reflectFields = append(reflectFields, reflectField{index: i, isNullable: isNullableType(f.Type), kind: f.Type.Kind()})
 	}
 
 	// Sort fields by name for deterministic encoding order
-	sort.SliceStable(rafFields, func(i, j int) bool {
-		return rafFields[i].Name < rafFields[j].Name
-	})
-	sort.SliceStable(reflectFields, func(i, j int) bool {
-		return rafFields[i].Name < rafFields[j].Name
-	})
-
-	return &structFields{rafFields: rafFields, reflectFields: reflectFields}, nil
+	structFields := &structFields{rafFields: rafFields, reflectFields: reflectFields}
+	sort.Stable(structFields)
+	return structFields, nil
 }
 
 func isNullableType(rt reflect.Type) bool {
@@ -76,7 +85,7 @@ func isNullableType(rt reflect.Type) bool {
 }
 
 func reflectTypeToRAFType(rt reflect.Type) (Type, error) {
-	for rt.Kind() == reflect.Ptr {
+	for rt.Kind() == reflect.Pointer {
 		rt = rt.Elem()
 	}
 
@@ -183,6 +192,24 @@ func (m *Marshaler) marshalStruct(builder *Builder, rv reflect.Value) error {
 			continue
 		}
 
+		switch rf.kind {
+		case reflect.String:
+			builder.AddString(fieldValue.String())
+			continue
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			builder.AddInt64(fieldValue.Int())
+			continue
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			builder.AddInt64(int64(fieldValue.Uint()))
+			continue
+		case reflect.Float32, reflect.Float64:
+			builder.AddFloat64(fieldValue.Float())
+			continue
+		case reflect.Bool:
+			builder.AddBool(fieldValue.Bool())
+			continue
+		}
+
 		if err := m.marshalValue(builder, fieldValue); err != nil {
 			return err
 		}
@@ -205,19 +232,21 @@ func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
 		va.AddString(rv.String())
 	case reflect.Struct:
 		innerBuilder := m.builderPool.Get().(*Builder)
-		defer m.builderPool.Put(innerBuilder)
 		innerBuilder.Reset()
 
 		err := m.marshalStruct(innerBuilder, rv)
 		if err != nil {
+			m.builderPool.Put(innerBuilder)
 			return err
 		}
 
 		data, err := innerBuilder.Build()
 		if err != nil {
+			m.builderPool.Put(innerBuilder)
 			return err
 		}
 		va.AddRaw(data)
+		m.builderPool.Put(innerBuilder)
 	case reflect.Slice:
 		count := rv.Len()
 		elemType := rv.Type().Elem()
@@ -232,27 +261,100 @@ func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
 		}
 
 		innerArrayBuilder := m.arrayBuilderPool.Get().(*ArrayBuilder)
-		defer m.arrayBuilderPool.Put(innerArrayBuilder)
 		innerArrayBuilder.Reset(rafElemType, count)
 
-		for i := range count {
-			elemValue := rv.Index(i)
-			if isNullable && elemValue.IsNil() {
-				innerArrayBuilder.AddNull()
-				continue
-			}
+		elemKind := elemType.Kind()
+		for elemKind == reflect.Pointer {
+			elemKind = elemType.Elem().Kind()
+		}
 
-			if err := m.marshalValue(innerArrayBuilder, elemValue); err != nil {
-				return err
+		switch elemKind {
+		case reflect.String:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddString(elemValue.String())
+			}
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddInt64(elemValue.Int())
+			}
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddInt64(int64(elemValue.Uint()))
+			}
+		case reflect.Float32, reflect.Float64:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddFloat64(elemValue.Float())
+			}
+		case reflect.Bool:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddBool(elemValue.Bool())
+			}
+		default:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+
+				if err := m.marshalValue(innerArrayBuilder, elemValue); err != nil {
+					m.arrayBuilderPool.Put(innerArrayBuilder)
+					return err
+				}
 			}
 		}
 
 		innerArrayBuilderData, err := innerArrayBuilder.Build()
 		if err != nil {
+			m.arrayBuilderPool.Put(innerArrayBuilder)
 			return err
 		}
 
 		va.AddRaw(innerArrayBuilderData)
+		m.arrayBuilderPool.Put(innerArrayBuilder)
 
 	default:
 		return fmt.Errorf("raf: unsupported value type %s", rv.Type().String())
