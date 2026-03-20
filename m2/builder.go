@@ -1,4 +1,4 @@
-package main
+package m2
 
 import (
 	"encoding/binary"
@@ -14,7 +14,7 @@ import (
 //
 // Layout:
 //
-//	[u8]  Version (e.g., 0x01)
+//	[u16]  Version (e.g., 0x01)
 //	[u32] Total data size
 //	[u16]  Number of pairs (N)
 //	[u8  * N]     Array of value types
@@ -51,20 +51,51 @@ const (
 	TypeMap     Type = 0x06
 )
 
+func (t Type) String() string {
+	switch t {
+	case TypeString:
+		return "string"
+	case TypeInt64:
+		return "int64"
+	case TypeFloat64:
+		return "float64"
+	case TypeBool:
+		return "bool"
+	case TypeArray:
+		return "array"
+	case TypeMap:
+		return "map"
+	default:
+		return fmt.Sprintf("unknown(%d)", t)
+	}
+}
+func (t Type) Size() int {
+	switch t {
+	case TypeString, TypeArray, TypeMap:
+		return -1
+	case TypeInt64, TypeFloat64:
+		return 8
+	case TypeBool:
+		return 1
+	default:
+		panic(fmt.Sprintf("unknown type: %d", t))
+	}
+}
+
+func (t Type) isDynamic() bool {
+	return t.Size() < 0
+}
+
 var (
 	ErrValueCountMismatch = errors.New("number of values added does not match number of keys")
 	ErrArrayCountMismatch = errors.New("number of array elements added does not match expected count")
 )
 
 const (
-	Version        byte = 0x01
-	hVersionSize        = 1
-	hSizeSize           = 4 // u32
-	hCountSize          = 2 // u16
-	hKeyOffsetSize      = 2 // u16
-	hValTypeSize        = 1 // u8
-	hValOffsetSize      = 4 // u32
-	hSize               = hVersionSize + hSizeSize + hCountSize
+	Version        uint16 = 0xff01
+	hVersionSize          = 2
+	hSizeSize             = 4 // u32
+	hValOffsetSize        = 4 // u32
 )
 
 type Builder struct {
@@ -96,9 +127,12 @@ func (b *Builder) Reset() {
 	b.valueIndex = 0
 	b.keyCount = 0
 
-	b.buf = append(b.buf, Version)
-	// Reserve space for size
-	b.buf = append(b.buf, 0, 0, 0, 0) // size (u32)
+	// Write version and reserve space for size
+	if cap(b.buf) < hVersionSize+hSizeSize {
+		b.buf = make([]byte, hVersionSize+hSizeSize)
+	} else {
+		b.buf = b.buf[:hVersionSize+hSizeSize]
+	}
 }
 
 type KeyType struct {
@@ -196,13 +230,22 @@ func (b *Builder) AddBool(value bool) {
 	b.lastValOffset++
 }
 
-func (b *Builder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder)) error {
+func (b *Builder) AddNull() {
+	// Add an offset of 0 for null values. The reader will interpret this as null.
+	binary.LittleEndian.PutUint32(b.buf[b.valOffsetsStart+b.valueIndex*hValOffsetSize:], uint32(b.lastValOffset))
+	b.valueIndex++
+
+}
+
+func (b *Builder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder) error) error {
 	if b.cachedArrayBuilder == nil {
 		b.cachedArrayBuilder = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
 	} else {
 		b.cachedArrayBuilder.Reset(elemType, count)
 	}
-	fn(b.cachedArrayBuilder)
+	if err := fn(b.cachedArrayBuilder); err != nil {
+		return err
+	}
 	arr, err := b.cachedArrayBuilder.Build()
 	if err != nil {
 		return err
@@ -266,6 +309,9 @@ type ArrayBuilder struct {
 	isDynamic    bool
 	offsetsStart int
 	lastOffset   int
+
+	builderCache      *Builder
+	arrayBuilderCache *ArrayBuilder
 }
 
 func NewArrayBuilder(buf []byte, elemType Type, count int) *ArrayBuilder {
@@ -331,6 +377,12 @@ func (a *ArrayBuilder) AddBool(value bool) {
 	}
 }
 
+func (a *ArrayBuilder) AddNull() {
+	// Add an offset of 0 for null values. The reader will interpret this as null.
+	binary.LittleEndian.PutUint16(a.buf[a.offsetsStart+a.valueIndex*aOffsetSize:], uint16(a.lastOffset))
+	a.valueIndex++
+}
+
 func (a *ArrayBuilder) AddRaw(value []byte) {
 	if a.isDynamic {
 		binary.LittleEndian.PutUint16(a.buf[a.offsetsStart+a.valueIndex*aOffsetSize:], uint16(a.lastOffset))
@@ -338,6 +390,39 @@ func (a *ArrayBuilder) AddRaw(value []byte) {
 	}
 	a.valueIndex++
 	a.buf = append(a.buf, value...)
+}
+
+func (a *ArrayBuilder) AddBuilderFn(fn func(mb *Builder) error) error {
+	if a.builderCache == nil {
+		a.builderCache = NewBuilder(make([]byte, 0, 256))
+	} else {
+		a.builderCache.Reset()
+	}
+	if err := fn(a.builderCache); err != nil {
+		return err
+	}
+	m, err := a.builderCache.Build()
+	if err != nil {
+		return err
+	}
+	a.AddRaw(m)
+	return nil
+}
+
+func (a *ArrayBuilder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder) error) error {
+	if a.arrayBuilderCache == nil {
+		a.arrayBuilderCache = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
+	}
+	a.arrayBuilderCache.Reset(elemType, count)
+	if err := fn(a.arrayBuilderCache); err != nil {
+		return err
+	}
+	arr, err := a.arrayBuilderCache.Build()
+	if err != nil {
+		return err
+	}
+	a.AddRaw(arr)
+	return nil
 }
 
 func (a *ArrayBuilder) Build() ([]byte, error) {

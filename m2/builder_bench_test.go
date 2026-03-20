@@ -1,4 +1,4 @@
-package main
+package m2
 
 import "testing"
 
@@ -120,10 +120,11 @@ func BenchmarkBuild_WithArrayAndMap(b *testing.B) {
 		builder.AddString("Ali")
 		builder.AddInt64(30)
 
-		err := builder.AddArrayFn(TypeString, 3, func(ab *ArrayBuilder) {
+		err := builder.AddArrayFn(TypeString, 3, func(ab *ArrayBuilder) error {
 			ab.AddString("go")
 			ab.AddString("rust")
 			ab.AddString("zig")
+			return nil
 		})
 		if err != nil {
 			b.Fatal(err)
