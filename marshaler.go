@@ -72,10 +72,10 @@ func computeStructFields(rt reflect.Type) (*structFields, error) {
 }
 
 func isNullableType(rt reflect.Type) bool {
-	for rt.Kind() == reflect.Pointer {
+	switch rt.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Interface:
 		return true
 	}
-
 	return false
 }
 
@@ -293,6 +293,14 @@ func (m *Marshaler) marshalMapValue(va valueAdder, rv reflect.Value) error {
 }
 
 func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
+	for rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			va.AddNull()
+			return nil
+		}
+		rv = rv.Elem()
+	}
+
 	switch rv.Kind() {
 	case reflect.Bool:
 		va.AddBool(rv.Bool())

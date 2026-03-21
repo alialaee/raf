@@ -92,8 +92,8 @@ func makeComplexStruct() ComplexStruct {
 		Float32: 3.14,
 		Float64: 2.71828,
 
-		IntPointer:    new(int),
-		StringPointer: new(string),
+		IntPointer:    new(42),
+		StringPointer: new("hello pointer"),
 
 		Strings: []string{"foo", "bar", "baz"},
 		Bools:   []bool{true, false, true},
@@ -258,8 +258,8 @@ func TestUnmarshalMap(t *testing.T) {
 		"float32": float64(float32(3.14)),
 		"float64": float64(2.71828),
 
-		"int_pointer":    int64(0), // TODO fix
-		"string_pointer": "",
+		"int_pointer":    int64(42),
+		"string_pointer": "hello pointer",
 
 		"strings": []string{"foo", "bar", "baz"},
 		"bools":   []bool{true, false, true}, // TODO fix
@@ -333,8 +333,8 @@ func TestMarshalAndUnmarshalMap(t *testing.T) {
 		"float32": float64(float32(3.14)),
 		"float64": float64(2.71828),
 
-		"int_pointer":    int64(0), // TODO fix
-		"string_pointer": "",
+		"int_pointer":    int64(42),
+		"string_pointer": "hello pointer",
 
 		"strings": []string{"foo", "bar", "baz"},
 		"bools":   []bool{true, false, true}, // TODO fix

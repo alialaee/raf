@@ -255,6 +255,14 @@ func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data Block, base unsafe.Point
 		val := data.ValueAt(dataI)
 		targetKind := op.targetKind
 
+		if len(val.Data) == 0 {
+			if op.kind == reflect.Pointer {
+				opsI++
+				dataI++
+				continue
+			}
+		}
+
 		if op.kind == reflect.Pointer {
 			fieldValue := reflect.NewAt(op.fieldType, fieldPtr).Elem()
 			if fieldValue.IsNil() {
@@ -297,10 +305,16 @@ func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data Block, base unsafe.Point
 		case reflect.String:
 			*(*string)(fieldPtr) = val.String()
 		case reflect.Struct:
+			if len(val.Data) == 0 {
+				break
+			}
 			if err := u.unmarshal(op.nested, val.Map(), fieldPtr); err != nil {
 				return err
 			}
 		case reflect.Slice:
+			if len(val.Data) == 0 {
+				break
+			}
 			arr := val.Array()
 			fieldValue := reflect.NewAt(op.targetType, fieldPtr).Elem()
 			arrLen := arr.Len()
