@@ -69,3 +69,48 @@ func BenchmarkMarshalJSON(b *testing.B) {
 		}
 	}
 }
+
+var benchMap = map[string]any{
+	"id":        int64(123456789),
+	"name":      "Ali Alaee",
+	"is_active": true,
+	"score":     99.99,
+	"roles":     []string{"admin", "editor", "viewer"},
+	"inner": map[string]any{
+		"user_id":  int64(987654321),
+		"username": "ali.alaee",
+		"auth": map[string]any{
+			"password":   "password123",
+			"auth_token": "token123",
+		},
+	},
+}
+
+func BenchmarkMarshalMap(b *testing.B) {
+	var err error
+	marshaler := NewMarshaler()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_, err = marshaler.Marshal(benchMap)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMarshalMapJSON(b *testing.B) {
+	var err error
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_, err = json.Marshal(benchMap)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

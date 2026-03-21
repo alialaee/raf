@@ -76,11 +76,6 @@ func isNullableType(rt reflect.Type) bool {
 		return true
 	}
 
-	// switch rt.Kind() {
-	// case reflect.Slice, reflect.Map:
-	// 	return true
-	// }
-
 	return false
 }
 
@@ -154,12 +149,17 @@ func (m *Marshaler) Marshal(v any) ([]byte, error) {
 		rv = rv.Elem() // TODO let's have a for loop here
 	}
 
-	if rv.Kind() != reflect.Map && rv.Kind() != reflect.Struct {
+	switch rv.Kind() {
+	case reflect.Struct:
+		if err := m.marshalStruct(builder, rv); err != nil {
+			return nil, err
+		}
+	case reflect.Map:
+		if err := m.marshalMap(builder, rv); err != nil {
+			return nil, err
+		}
+	default:
 		return nil, errors.New("raf: Marshal called with unsupported root type, must be struct or map")
-	}
-
-	if err := m.marshalStruct(builder, rv); err != nil {
-		return nil, err
 	}
 
 	data, err := builder.Build()
@@ -168,7 +168,6 @@ func (m *Marshaler) Marshal(v any) ([]byte, error) {
 	}
 
 	// Copy data to a new slice.
-
 	result := make([]byte, len(data))
 	copy(result, data)
 
@@ -218,6 +217,81 @@ func (m *Marshaler) marshalStruct(builder *Builder, rv reflect.Value) error {
 	return nil
 }
 
+type mapEntry struct {
+	kt  KeyType
+	val reflect.Value
+}
+
+func (m *Marshaler) marshalMap(builder *Builder, rv reflect.Value) error {
+	if rv.Type().Key().Kind() != reflect.String {
+		return errors.New("raf: map key must be string")
+	}
+
+	n := rv.Len()
+	entries := make([]mapEntry, 0, n)
+
+	iter := rv.MapRange()
+	for iter.Next() {
+		v := iter.Value()
+		for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+			if v.IsNil() {
+				break
+			}
+			v = v.Elem()
+		}
+
+		rafType, err := reflectTypeToRAFType(v.Type())
+		if err != nil {
+			return fmt.Errorf("raf: unsupported map value type %s for key %q", v.Type().String(), iter.Key().String())
+		}
+
+		entries = append(entries, mapEntry{
+			kt:  KeyType{Name: iter.Key().String(), Type: rafType},
+			val: v,
+		})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].kt.Name < entries[j].kt.Name
+	})
+
+	// Build KeyType slice from sorted entries
+	keys := make([]KeyType, n)
+	for i := range entries {
+		keys[i] = entries[i].kt
+	}
+	builder.AddKeys(keys...)
+
+	// Write values in sorted order
+	for _, e := range entries {
+		if err := m.marshalValue(builder, e.val); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *Marshaler) marshalMapValue(va valueAdder, rv reflect.Value) error {
+	innerBuilder := m.builderPool.Get().(*Builder)
+	innerBuilder.Reset()
+
+	err := m.marshalMap(innerBuilder, rv)
+	if err != nil {
+		m.builderPool.Put(innerBuilder)
+		return err
+	}
+
+	data, err := innerBuilder.Build()
+	if err != nil {
+		m.builderPool.Put(innerBuilder)
+		return err
+	}
+	va.AddRaw(data)
+	m.builderPool.Put(innerBuilder)
+	return nil
+}
+
 func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
 	switch rv.Kind() {
 	case reflect.Bool:
@@ -247,6 +321,12 @@ func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
 		}
 		va.AddRaw(data)
 		m.builderPool.Put(innerBuilder)
+	case reflect.Map:
+		if rv.IsNil() {
+			va.AddNull()
+			return nil
+		}
+		return m.marshalMapValue(va, rv)
 	case reflect.Slice:
 		count := rv.Len()
 		elemType := rv.Type().Elem()
