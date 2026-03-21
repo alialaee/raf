@@ -17,24 +17,8 @@ Designed for fast read access across a few kilobytes of data, keys are sorted le
 - **Compact:** Low-overhead binary format.
 - **Type-rich:** Supports types similar to JSON, see [Differences from JSON](#differences-from-json).
 - **Schema-less**
-- **Zero-dependency**
-- **Canonical serialization**
-- **Zero-allocation**
-
-## Goals
-
-- Prioritize read performance and random access.
-- Keep the format simple to understand.
-- Canonical serialization (only one representation of a single data).
-- Minimal allocations.
-- Be suitable for use both on the wire and on disk.
-- Provide a highly ergonomic API.
-- Keep schemas optional.
-
-## Non-Goals
-
-- Streaming and support for large datasets.
-- Unions and other complex, high-level data types.
+- **Canonical serialization:** Only one representation of a single data.
+- **Zero-allocation** by using `Builder` and `Block` and minimal allocations using `Marshal` and `Unmarshal`.
 
 ## Differences from JSON
 
