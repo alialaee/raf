@@ -373,7 +373,7 @@ func BenchmarkMapRead(b *testing.B) {
 		if !ok || val.Type != TypeMap {
 			b.Fatal("map not found")
 		}
-		innerBlock := val.Map()
+		innerBlock := val.Block()
 		ival, iok := innerBlock.Get(nameKey)
 		if !iok || ival.Type != TypeString || ival.String() != "Ali" {
 			b.Fatal("inner value mismatch")

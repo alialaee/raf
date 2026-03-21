@@ -301,7 +301,7 @@ func TestMapType(t *testing.T) {
 	if !ok || val.Type != TypeMap {
 		t.Fatalf("Failed map lookup: ok=%v vt=%d", ok, val.Type)
 	}
-	innerBlock := val.Map()
+	innerBlock := val.Block()
 	if !innerBlock.Valid() {
 		t.Fatal("Inner block should be valid")
 	}
@@ -328,7 +328,7 @@ func TestMapType(t *testing.T) {
 	if !ok || val.Type != TypeMap {
 		t.Fatalf("Failed nested map lookup")
 	}
-	nestedBlock := val.Map()
+	nestedBlock := val.Block()
 	if !nestedBlock.Valid() {
 		t.Fatal("Nested block should be valid")
 	}
@@ -342,7 +342,7 @@ func TestMapType(t *testing.T) {
 	if !ok || val.Type != TypeMap {
 		t.Fatalf("Failed empty map lookup")
 	}
-	emptyBlock := val.Map()
+	emptyBlock := val.Block()
 	if !emptyBlock.Valid() {
 		t.Fatal("Empty block should be valid")
 	}

@@ -59,25 +59,26 @@ goarch: arm64
 pkg: github.com/alialaee/raf/benchmark
 cpu: Apple M4
 
-BenchmarkRAF_Marshal-10				1459 ns/op	    1343 B/op	       1 allocs/op
-BenchmarkMsgPack_Marshal-10			1937 ns/op	    2327 B/op	       6 allocs/op
-BenchmarkJSON_Marshal-10			1373 ns/op	    1355 B/op	       2 allocs/op
-BenchmarkCBOR_Marshal-10			1152 ns/op	    1046 B/op	       2 allocs/op
-BenchmarkBSON_Marshal-10			2804 ns/op	    1391 B/op	       2 allocs/op
+BenchmarkRAF_Marshal-10         1277 ns/op	    2016 B/op	       2 allocs/op
+BenchmarkMsgPack_Marshal-10     1860 ns/op	    2327 B/op	       6 allocs/op
+BenchmarkJSON_Marshal-10        1297 ns/op	    1355 B/op	       2 allocs/op
+BenchmarkCBOR_Marshal-10        1126 ns/op	    1046 B/op	       2 allocs/op
+BenchmarkBSON_Marshal-10        2763 ns/op	    1391 B/op	       2 allocs/op
 
-BenchmarkRAF_Unmarshal-10			1002 ns/op	     913 B/op	      25 allocs/op
-BenchmarkRAF_Lookup_Name-10			16.04 ns/op	       0 B/op	       0 allocs/op
-BenchmarkJSON_Unmarshal-10			7942 ns/op	    1744 B/op	      35 allocs/op
-BenchmarkMsgPack_Unmarshal-10		3154 ns/op	    1290 B/op	      28 allocs/op
-BenchmarkCBOR_Unmarshal-10			3458 ns/op	     914 B/op	      25 allocs/op
-BenchmarkBSON_Unmarshal-10			6170 ns/op	    2839 B/op	     154 allocs/op
+BenchmarkRAF_Unmarshal-10       947.8 ns/op	     913 B/op	      25 allocs/op
+BenchmarkRAF_Lookup_Name-10     17.63 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJSON_Unmarshal-10      7816 ns/op	    1744 B/op	      35 allocs/op
+BenchmarkMsgPack_Unmarshal-10   3223 ns/op	    1290 B/op	      28 allocs/op
+BenchmarkCBOR_Unmarshal-10      3419 ns/op	     914 B/op	      25 allocs/op
+BenchmarkBSON_Unmarshal-10      6073 ns/op	    2839 B/op	     154 allocs/op
 ```
-
-As you can see, `raf` marshaler needs some optimizations, but it's already very competitive. The unmarshaler is the fastest, and the lookup performance is excellent, with zero allocations.
 
 ## Example Usage
 
-It's possible to use Marshaling and Unmarshaling for general cases, but for higher performance use-cases, it's recommended to use `Builder` and `Block` directly.
+You can use `raf` in two ways:
+
+- Using `Marshal` and `Unmarshal` for general cases.
+- Using `Builder` and `Block` for higher performance use-cases. Using `Block` let's you to lookup specific fields without deserializing the whole payload.
 
 ### Marshaling and Unmarshaling
 
@@ -122,57 +123,120 @@ func main() {
 }
 ```
 
-### Building a Payload
+### Builder and Block
 
-Use `raf.Builder` to construct your payload. It allocates memory and handles offsets.
+Use `raf.Builder` to construct your payload and `raf.Block` to read it. `Block` let's you to lookup specific fields without deserializing the whole payload.
 
 ```go
-package main
-
 import (
 	"fmt"
 	"github.com/alialaee/raf"
 )
+func Build() []byte {
+	b := raf.NewBuilder(nil)
+	b.AddKeys(
+		raf.KeyType{
+			Name: "a_string",
+			Type: raf.TypeString,
+		},
+		raf.KeyType{
+			Name: "b_int64",
+			Type: raf.TypeInt64,
+		},
+		raf.KeyType{
+			Name: "c_bool",
+			Type: raf.TypeBool,
+		},
+		raf.KeyType{
+			Name: "d_map",
+			Type: raf.TypeMap,
+		},
+		raf.KeyType{
+			Name: "e_array",
+			Type: raf.TypeArray,
+		},
+	)
 
-func main() {
-	b := raf.NewBuilder()
+	b.AddString("raf")
+	b.AddInt64(1)
+	b.AddBool(true)
 
-	// Keys are automatically sorted during build
-	b.AddString([]byte("name"), []byte("raf"))
-	b.AddInt64([]byte("version"), 1)
-	b.AddBool([]byte("fast"), true)
-
-	// You can add nested fields as well
-	nested := raf.NewBuilder()
-	nested.AddString([]byte("author"), []byte("ali"))
-	nestedBuf, _ := nested.Build(nil)
-	b.AddMap([]byte("metadata"), nestedBuf)
-
-	// Build into a byte slice
-	buf, err := b.Build(nil)
+	// Let's add a map
+	err := b.AddBuilderFn(func(b *raf.Builder) error {
+		b.AddKeys(
+			raf.KeyType{
+				Name: "author",
+				Type: raf.TypeString,
+			},
+		)
+		b.AddString("ali")
+		return nil
+	})
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("Payload size: %d bytes\n", len(buf))
+	// Let's add an array
+	err = b.AddArrayFn(raf.TypeString, 3, func(b *raf.ArrayBuilder) error {
+		b.AddString("admin")
+		b.AddString("user")
+		b.AddString("guest")
+		return nil
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	// Build into a byte slice
+	buf, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
+
+	return buf
 }
-```
 
-### Reading a Payload
-
-Given a byte slice, you can quickly look up specific fields by casting it to `raf.Block` and using the `Get` method, without deserializing everything.
-
-```go
-	block := raf.Block(buf)
+func Read(buf []byte) {
+	block := raf.NewBlock(buf)
 	if !block.Valid() {
 		panic("invalid payload")
 	}
 
 	// Look up by key directly
-	val, ok := block.Get([]byte("name"))
+	val, ok := block.Get([]byte("a_string"))
 	if ok && val.Type == raf.TypeString {
-		fmt.Printf("Name: %s\n", val.String())
+		fmt.Printf("a_string: %s\n", val.String())
 	}
+
+	val, ok = block.Get([]byte("b_int64"))
+	if ok && val.Type == raf.TypeInt64 {
+		fmt.Printf("b_int64: %d\n", val.Int64())
+	}
+
+	val, ok = block.Get([]byte("c_bool"))
+	if ok && val.Type == raf.TypeBool {
+		fmt.Printf("c_bool: %t\n", val.Bool())
+	}
+
+	val, ok = block.Get([]byte("d_map"))
+	if ok && val.Type == raf.TypeMap {
+		d_map := val.Block()
+		val, ok = d_map.Get([]byte("author"))
+		if ok && val.Type == raf.TypeString {
+			fmt.Printf("DMap:\n\tAuthor: %s\n", val.String())
+		}
+	}
+
+	val, ok = block.Get([]byte("e_array"))
+	if ok && val.Type == raf.TypeArray {
+		e_array := val.Array()
+		fmt.Printf("EArray:\n")
+		for i := 0; i < e_array.Len(); i++ {
+			fmt.Printf("\t%d: %s\n", i, e_array.AtString(i, nil))
+		}
+	}
+
+}
 ```
 
 ## Installation

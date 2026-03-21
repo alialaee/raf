@@ -256,7 +256,7 @@ func (v Value) Array() Array {
 	return Array(v.Data)
 }
 
-func (v Value) Map() Block {
+func (v Value) Block() Block {
 	if v.Type != TypeMap {
 		return Block{}
 	}

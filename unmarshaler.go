@@ -127,7 +127,7 @@ func unmarshalValueToAny(val Value) any {
 	case TypeBool:
 		return val.Bool()
 	case TypeMap:
-		return unmarshalBlockToMap(val.Map())
+		return unmarshalBlockToMap(val.Block())
 	case TypeArray:
 		arr := val.Array()
 		n := arr.Len()
@@ -308,7 +308,7 @@ func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data Block, base unsafe.Point
 			if len(val.Data) == 0 {
 				break
 			}
-			if err := u.unmarshal(op.nested, val.Map(), fieldPtr); err != nil {
+			if err := u.unmarshal(op.nested, val.Block(), fieldPtr); err != nil {
 				return err
 			}
 		case reflect.Slice:
