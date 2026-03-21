@@ -5,23 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 )
 
 type Type uint8
 
 const (
-	Version uint8 = 0x01
-
 	TypeString  Type = 0x01
 	TypeInt64   Type = 0x02
 	TypeFloat64 Type = 0x03
 	TypeBool    Type = 0x04
-	TypeNull    Type = 0xff
 	TypeArray   Type = 0x05
 	TypeMap     Type = 0x06
-
-	maxKeySize = 4 * 1024
 )
 
 func (t Type) String() string {
@@ -34,8 +28,6 @@ func (t Type) String() string {
 		return "float64"
 	case TypeBool:
 		return "bool"
-	case TypeNull:
-		return "null"
 	case TypeArray:
 		return "array"
 	case TypeMap:
@@ -44,13 +36,6 @@ func (t Type) String() string {
 		return fmt.Sprintf("unknown(%d)", t)
 	}
 }
-
-var (
-	ErrBlockTooLarge = errors.New("raf: block too large (max 64KB)")
-	ErrTooManyPairs  = errors.New("raf: too many pairs (max 255)")
-	ErrInvalidKey    = errors.New("raf: key is not valid")
-)
-
 func (t Type) Size() int {
 	switch t {
 	case TypeString, TypeArray, TypeMap:
@@ -59,8 +44,6 @@ func (t Type) Size() int {
 		return 8
 	case TypeBool:
 		return 1
-	case TypeNull:
-		return 0
 	default:
 		panic(fmt.Sprintf("unknown type: %d", t))
 	}
@@ -70,450 +53,390 @@ func (t Type) isDynamic() bool {
 	return t.Size() < 0
 }
 
-// Builder allows for zero-allocation encoding of raf blocks.
-type Builder struct {
-	keys       []byte
-	vals       []byte
-	keyOffsets []uint16 // Starts with 0
-	valOffsets []uint16 // Starts with 0
-	types      []byte
+var (
+	ErrValueCountMismatch = errors.New("number of values added does not match number of keys")
+	ErrArrayCountMismatch = errors.New("number of array elements added does not match expected count")
+)
 
-	lastKey       string   // Tracked to ensure keys are added in sorted order
-	arrayBuf      []byte   // Scratch buffer reused for array value serialization
-	inner         *Builder // Reusable inner builder for nested map and struct encoding
-	innerBuildBuf []byte   // Scratch buffer for inner.Build output and it's preserved across Reset
+const (
+	Version        = 0xff01
+	hVersionSize   = 2
+	hSizeSize      = 4 // u32
+	hValOffsetSize = 4 // u32
+)
+
+type Builder struct {
+	buf []byte
+
+	valOffsetsStart int
+	lastValOffset   int
+	valueIndex      int
+	keyCount        int
+
+	// Cache for builders
+	cachedArrayBuilder *ArrayBuilder
+	cachedBuilder      *Builder
 }
 
-func NewBuilder() *Builder {
-	b := &Builder{}
+type KeyType struct {
+	Name string
+	Type Type
+}
+
+func NewBuilder(buf []byte) *Builder {
+	b := &Builder{
+		buf: buf,
+	}
 	b.Reset()
+
 	return b
 }
 
 // Reset clears the builder state for zero-allocation reuse.
 func (b *Builder) Reset() {
-	b.keys = b.keys[:0]
-	b.vals = b.vals[:0]
+	b.buf = b.buf[:0]
 
-	// Reset offsets to contain only the 0th offset
-	b.keyOffsets = b.keyOffsets[:0]
-	b.keyOffsets = append(b.keyOffsets, 0)
-	b.valOffsets = b.valOffsets[:0]
-	b.valOffsets = append(b.valOffsets, 0)
+	b.lastValOffset = 0
+	b.valueIndex = 0
+	b.keyCount = 0
 
-	b.types = b.types[:0]
-	b.lastKey = ""
-	b.arrayBuf = b.arrayBuf[:0]
-}
-
-// checkKey verifies that the key is strictly greater than the last added key.
-func (b *Builder) checkKey(key string) error {
-	keySize := len(key)
-	if keySize == 0 {
-		return fmt.Errorf("%w: keys should be larger than zero", ErrInvalidKey)
-	}
-	if keySize > maxKeySize {
-		return fmt.Errorf("%w: keys should be smaller than 4KB", ErrInvalidKey)
-	}
-
-	if len(b.keys) > 0 {
-		cmp := strings.Compare(key, b.lastKey)
-		if cmp == 0 {
-			return fmt.Errorf("%w: duplicate key", ErrInvalidKey)
-		}
-		if cmp < 0 {
-			return fmt.Errorf("%w: keys not added in lexicographical order", ErrInvalidKey)
-		}
-	}
-
-	if len(b.types) >= 255 {
-		return ErrTooManyPairs
-	}
-
-	return nil
-}
-
-func (b *Builder) appendKey(key string) {
-	b.keys = append(b.keys, key...)
-	b.keyOffsets = append(b.keyOffsets, uint16(len(b.keys)))
-
-	b.lastKey = key
-}
-
-func (b *Builder) appendValue(valType Type, valBytes []byte) {
-	b.vals = append(b.vals, valBytes...)
-	b.valOffsets = append(b.valOffsets, uint16(len(b.vals)))
-	b.types = append(b.types, uint8(valType))
-}
-
-func (b *Builder) AddString(key string, val []byte) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-	b.appendValue(TypeString, val)
-	return nil
-}
-
-// AddStringString is a helper for adding string values without
-// unnecessary byte slice conversions.
-func (b *Builder) AddStringString(key string, val string) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-
-	b.vals = append(b.vals, val...)
-	b.valOffsets = append(b.valOffsets, uint16(len(b.vals)))
-	b.types = append(b.types, byte(TypeString))
-
-	return nil
-}
-
-func (b *Builder) AddInt64(key string, val int64) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], uint64(val))
-	b.appendValue(TypeInt64, buf[:])
-
-	return nil
-}
-
-func (b *Builder) AddFloat64(key string, val float64) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], math.Float64bits(val))
-	b.appendValue(TypeFloat64, buf[:])
-
-	return nil
-}
-
-func (b *Builder) AddBool(key string, val bool) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-
-	if val {
-		b.vals = append(b.vals, 0x01)
+	// Write version and reserve space for size
+	if cap(b.buf) < hVersionSize+hSizeSize {
+		b.buf = make([]byte, hVersionSize+hSizeSize)
 	} else {
-		b.vals = append(b.vals, 0x00)
+		b.buf = b.buf[:hVersionSize+hSizeSize]
 	}
-	b.valOffsets = append(b.valOffsets, uint16(len(b.vals)))
-	b.types = append(b.types, uint8(TypeBool))
-
-	return nil
 }
 
-func (b *Builder) AddNull(key string) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-	b.appendValue(TypeNull, nil)
+func (b *Builder) AddKeys(keys ...KeyType) {
+	count := len(keys)
+	b.keyCount = count
 
-	return nil
+	var keyBytesLen int
+	for i := range count {
+		keyBytesLen += len(keys[i].Name)
+	}
+
+	totalAdded := 2 + count + (count+1)*2 + keyBytesLen + (count+1)*hValOffsetSize
+	start := len(b.buf)
+
+	// Just ensure we have enough capacity to write without appends
+	if cap(b.buf)-start < totalAdded {
+		newBuf := make([]byte, start, start*2+totalAdded)
+		copy(newBuf, b.buf)
+		b.buf = newBuf
+	}
+	b.buf = b.buf[:start+totalAdded]
+
+	pos := start
+
+	// Add key count
+	binary.LittleEndian.PutUint16(b.buf[pos:], uint16(count))
+	pos += 2
+
+	// Add value types
+	for i := range count {
+		b.buf[pos] = byte(keys[i].Type)
+		pos++
+	}
+
+	// Add key offsets
+	offset := 0
+	for i := range count {
+		binary.LittleEndian.PutUint16(b.buf[pos:], uint16(offset))
+		keySize := len(keys[i].Name)
+
+		offset += keySize
+		pos += 2
+	}
+	binary.LittleEndian.PutUint16(b.buf[pos:], uint16(offset)) // For the end of the last key
+	pos += 2
+
+	// Add key bytes
+	for i := range count {
+		n := copy(b.buf[pos:], keys[i].Name)
+		pos += n
+	}
+
+	// Value offsets space is already reserved in totalAdded
+	b.valOffsetsStart = pos
 }
 
-// AddMap adds a map value. val must be a pre-built block (from Builder.Build).
-func (b *Builder) AddMap(key string, val []byte) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-	b.appendValue(TypeMap, val)
-	return nil
+func (b *Builder) AddString(value string) {
+	binary.LittleEndian.PutUint32(b.buf[b.valOffsetsStart+b.valueIndex*hValOffsetSize:], uint32(b.lastValOffset))
+	b.valueIndex++
+	b.buf = append(b.buf, value...)
+	b.lastValOffset += len(value)
 }
 
-// AddMapFn writes a nested map/struct value by calling fn with a reusable inner Builder.
-// The inner Builder is reset before fn is called and must not be retained after fn returns.
-// After warmup, this method incurs zero allocations.
-func (b *Builder) AddMapFn(key string, fn func(inner *Builder) error) error {
-	if err := b.checkKey(key); err != nil {
+func (b *Builder) AddInt64(value int64) {
+	binary.LittleEndian.PutUint32(b.buf[b.valOffsetsStart+b.valueIndex*hValOffsetSize:], uint32(b.lastValOffset))
+	b.valueIndex++
+	pos := len(b.buf)
+	b.buf = append(b.buf, 0, 0, 0, 0, 0, 0, 0, 0)
+	binary.LittleEndian.PutUint64(b.buf[pos:], uint64(value))
+	b.lastValOffset += 8
+}
+
+func (b *Builder) AddFloat64(value float64) {
+	binary.LittleEndian.PutUint32(b.buf[b.valOffsetsStart+b.valueIndex*hValOffsetSize:], uint32(b.lastValOffset))
+	b.valueIndex++
+	pos := len(b.buf)
+	b.buf = append(b.buf, 0, 0, 0, 0, 0, 0, 0, 0)
+	binary.LittleEndian.PutUint64(b.buf[pos:], math.Float64bits(value))
+	b.lastValOffset += 8
+}
+
+func (b *Builder) AddBool(value bool) {
+	binary.LittleEndian.PutUint32(b.buf[b.valOffsetsStart+b.valueIndex*hValOffsetSize:], uint32(b.lastValOffset))
+	b.valueIndex++
+	if value {
+		b.buf = append(b.buf, 1)
+	} else {
+		b.buf = append(b.buf, 0)
+	}
+	b.lastValOffset++
+}
+
+func (b *Builder) AddNull() {
+	// Add an offset of 0 for null values. The reader will interpret this as null.
+	binary.LittleEndian.PutUint32(b.buf[b.valOffsetsStart+b.valueIndex*hValOffsetSize:], uint32(b.lastValOffset))
+	b.valueIndex++
+
+}
+
+func (b *Builder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder) error) error {
+	if b.cachedArrayBuilder == nil {
+		b.cachedArrayBuilder = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
+	} else {
+		b.cachedArrayBuilder.Reset(elemType, count)
+	}
+	if err := fn(b.cachedArrayBuilder); err != nil {
 		return err
 	}
-	b.appendKey(key)
-	if b.inner == nil {
-		b.inner = &Builder{}
-	}
-	b.inner.Reset()
-	if err := fn(b.inner); err != nil {
-		return err
-	}
-	var err error
-	b.innerBuildBuf, err = b.inner.Build(b.innerBuildBuf)
+	arr, err := b.cachedArrayBuilder.Build()
 	if err != nil {
 		return err
 	}
-	b.appendValue(TypeMap, b.innerBuildBuf)
+	b.AddRaw(arr)
 	return nil
 }
 
-// addMapArrayFromFn writes a TypeArray(TypeMap) value where each element is built by fn.
-// fn is called once per element; its inner Builder is reset between calls.
-// A single inner Builder is reused for all elements, avoiding per-element allocations.
-func (b *Builder) addMapArrayFromFn(key string, count int, fn func(i int, inner *Builder) error) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-	if b.inner == nil {
-		b.inner = &Builder{}
-	}
-
-	b.appendArrayHeader(TypeMap, count)
-
-	offsetStart := len(b.arrayBuf)
-	for range count + 1 {
-		b.arrayBuf = append(b.arrayBuf, 0, 0)
-	}
-
-	var off uint16
-	var buf [2]byte
-	for i := range count {
-		b.inner.Reset()
-		if err := fn(i, b.inner); err != nil {
-			return err
-		}
-		var err error
-		b.innerBuildBuf, err = b.inner.Build(b.innerBuildBuf)
-		if err != nil {
-			return err
-		}
-		binary.LittleEndian.PutUint16(buf[:], off)
-		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
-		b.arrayBuf = append(b.arrayBuf, b.innerBuildBuf...)
-		off += uint16(len(b.innerBuildBuf))
-	}
-	binary.LittleEndian.PutUint16(buf[:], off)
-	copy(b.arrayBuf[offsetStart+count*2:], buf[:])
-
-	b.appendValue(TypeArray, b.arrayBuf)
-	return nil
-}
-
-// appendArrayHeader writes the element type (u8) + count (u16) to arrayBuf.
-func (b *Builder) appendArrayHeader(elemType Type, count int) {
-	b.arrayBuf = b.arrayBuf[:0]
-	b.arrayBuf = append(b.arrayBuf, byte(elemType))
-	var buf [2]byte
-	binary.LittleEndian.PutUint16(buf[:], uint16(count))
-	b.arrayBuf = append(b.arrayBuf, buf[:]...)
-}
-
-func (b *Builder) AddStringArray(key string, vals [][]byte) error {
-	return addStringArray(b, key, vals)
-}
-
-// AddStringStringArray is a helper for adding arrays of strings without
-// unnecessary byte slice conversions.
-func (b *Builder) AddStringStringArray(key string, vals []string) error {
-	return addStringArray(b, key, vals)
-}
-
-func (b *Builder) AddInt64Array(key string, vals []int64) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-
-	b.appendArrayHeader(TypeInt64, len(vals))
-
-	var buf [8]byte
-	for _, v := range vals {
-		binary.LittleEndian.PutUint64(buf[:], uint64(v))
-		b.arrayBuf = append(b.arrayBuf, buf[:]...)
-	}
-
-	b.appendValue(TypeArray, b.arrayBuf)
-	return nil
-}
-
-func (b *Builder) AddFloat64Array(key string, vals []float64) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-
-	b.appendArrayHeader(TypeFloat64, len(vals))
-
-	var buf [8]byte
-	for _, v := range vals {
-		binary.LittleEndian.PutUint64(buf[:], math.Float64bits(v))
-		b.arrayBuf = append(b.arrayBuf, buf[:]...)
-	}
-
-	b.appendValue(TypeArray, b.arrayBuf)
-	return nil
-}
-
-func (b *Builder) AddBoolArray(key string, vals []bool) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-
-	b.appendArrayHeader(TypeBool, len(vals))
-
-	for _, v := range vals {
-		if v {
-			b.arrayBuf = append(b.arrayBuf, 0x01)
-		} else {
-			b.arrayBuf = append(b.arrayBuf, 0x00)
-		}
-	}
-
-	b.appendValue(TypeArray, b.arrayBuf)
-	return nil
-}
-
-// AddMapArray adds an array of pre-built map blocks.
-// Each element of vals must be a valid RAF block (from Builder.Build).
-func (b *Builder) AddMapArray(key string, vals [][]byte) error {
-	if err := b.checkKey(key); err != nil {
-		return err
-	}
-	b.appendKey(key)
-
-	b.appendArrayHeader(TypeMap, len(vals))
-
-	// Offset table: (N+1) u16 values
-	offsetStart := len(b.arrayBuf)
-	for range len(vals) + 1 {
-		b.arrayBuf = append(b.arrayBuf, 0, 0)
-	}
-
-	var off uint16
-	var buf [2]byte
-	for i, v := range vals {
-		binary.LittleEndian.PutUint16(buf[:], off)
-		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
-		b.arrayBuf = append(b.arrayBuf, v...)
-		off += uint16(len(v))
-	}
-	// Final sentinel offset
-	binary.LittleEndian.PutUint16(buf[:], off)
-	copy(b.arrayBuf[offsetStart+len(vals)*2:], buf[:])
-
-	b.appendValue(TypeArray, b.arrayBuf)
-	return nil
-}
-
-// EstimateSize calculates the exact number of bytes the block will consume.
-func (b *Builder) EstimateSize() int {
-	n := len(b.types)
-	return 1 + // Version (u8)
-		2 + // Total data size (u16)
-		1 + // Number of pairs (u8)
-		(n+1)*2 + // key offsets (u16)
-		n*1 + // value types (u8)
-		(n+1)*2 + // value offsets (u16)
-		len(b.keys) + // key bytes
-		len(b.vals) // value bytes
-}
-
-// Build serializes the block to the given destination byte slice.
-// If cap(dst) is large enough, this performs zero allocations.
-// dst can be nil. It returns the filled byte slice and any formatting errors.
-func (b *Builder) Build(dst []byte) ([]byte, error) {
-	size := b.EstimateSize()
-	if size > math.MaxUint16 {
-		return nil, ErrBlockTooLarge
-	}
-
-	if cap(dst) < size {
-		dst = make([]byte, size)
+func (b *Builder) AddBuilderFn(fn func(mb *Builder) error) error {
+	if b.cachedBuilder == nil {
+		b.cachedBuilder = NewBuilder(make([]byte, 0, 256))
 	} else {
-		dst = dst[:size]
+		b.cachedBuilder.Reset()
 	}
-
-	// Layout:
-	//	[u8]  Version (e.g., 0x01)
-	//	[u16] Total data size
-	//	[u8]  Number of pairs (N)
-	//	[u16 * (N+1)] Array of key offsets (relative to start of key bytes)
-	//	[u8  * N]     Array of value types
-	//	[u16 * (N+1)] Array of value offsets (relative to start of value bytes)
-	//	[...u8]       Array of key bytes
-	//	[...u8]       Array of value bytes
-
-	cursor := 0
-
-	// 1. Version
-	dst[cursor] = Version
-	cursor += 1
-
-	// 2. Total data size
-	binary.LittleEndian.PutUint16(dst[cursor:], uint16(size))
-	cursor += 2
-
-	// 3. Number of pairs (N)
-	dst[cursor] = uint8(len(b.types))
-	cursor += 1
-
-	// 4. Array of key offsets
-	for _, offset := range b.keyOffsets {
-		binary.LittleEndian.PutUint16(dst[cursor:], offset)
-		cursor += 2
-	}
-
-	// 5. Array of value types
-	copy(dst[cursor:], b.types)
-	cursor += len(b.types)
-
-	// 6. Array of value offsets
-	for _, offset := range b.valOffsets {
-		binary.LittleEndian.PutUint16(dst[cursor:], offset)
-		cursor += 2
-	}
-
-	// 7. Array of key bytes
-	copy(dst[cursor:], b.keys)
-	cursor += len(b.keys)
-
-	// 8. Array of value bytes
-	copy(dst[cursor:], b.vals)
-
-	return dst, nil
-}
-
-func addStringArray[T interface{ string | []byte }](b *Builder, key string, vals []T) error {
-	if err := b.checkKey(key); err != nil {
+	if err := fn(b.cachedBuilder); err != nil {
 		return err
 	}
-	b.appendKey(key)
-
-	// Header: type + count
-	b.appendArrayHeader(TypeString, len(vals))
-
-	// Offset table: (N+1) u16 values
-	// First pass: compute offsets and append placeholders
-	offsetStart := len(b.arrayBuf)
-	for range len(vals) + 1 {
-		b.arrayBuf = append(b.arrayBuf, 0, 0)
+	m, err := b.cachedBuilder.Build()
+	if err != nil {
+		return err
 	}
-
-	// Second pass: write values and fill offsets
-	var off uint16
-	var buf [2]byte
-	for i, v := range vals {
-		binary.LittleEndian.PutUint16(buf[:], off)
-		copy(b.arrayBuf[offsetStart+i*2:], buf[:])
-		b.arrayBuf = append(b.arrayBuf, v...)
-		off += uint16(len(v))
-	}
-	// Final sentinel offset
-	binary.LittleEndian.PutUint16(buf[:], off)
-	copy(b.arrayBuf[offsetStart+len(vals)*2:], buf[:])
-
-	b.appendValue(TypeArray, b.arrayBuf)
+	b.AddRaw(m)
 	return nil
+}
+
+func (b *Builder) Build() ([]byte, error) {
+	if b.valueIndex != b.keyCount {
+		return nil, fmt.Errorf("%w: expected %d, got %d", ErrValueCountMismatch, b.keyCount, b.valueIndex)
+	}
+
+	// Write the final value offset
+	binary.LittleEndian.PutUint32(b.buf[b.valOffsetsStart+b.keyCount*hValOffsetSize:], uint32(b.lastValOffset))
+
+	// Update total size
+	totalSize := len(b.buf) - hVersionSize - hSizeSize
+	binary.LittleEndian.PutUint32(b.buf[hVersionSize:hVersionSize+hSizeSize], uint32(totalSize))
+
+	return b.buf, nil
+}
+
+// AddRaw allows adding a pre-serialized value directly to the builder.
+// This is for for adding arrays or maps where the value is already in the correct format.
+func (b *Builder) AddRaw(value []byte) {
+	binary.LittleEndian.PutUint32(b.buf[b.valOffsetsStart+b.valueIndex*hValOffsetSize:], uint32(b.lastValOffset))
+	b.valueIndex++
+	b.buf = append(b.buf, value...)
+	b.lastValOffset += len(value)
+}
+
+// AddStringArray it's a helper function to add a string array to the builder.
+// It's not the most performant way to add a string array to the builder.
+func (b *Builder) AddStringArray(values ...string) error {
+	return b.AddArrayFn(TypeString, len(values), func(ab *ArrayBuilder) error {
+		for _, v := range values {
+			ab.AddString(v)
+		}
+		return nil
+	})
+}
+
+func (b *Builder) AddBoolArray(values ...bool) error {
+	return b.AddArrayFn(TypeBool, len(values), func(ab *ArrayBuilder) error {
+		for _, v := range values {
+			ab.AddBool(v)
+		}
+		return nil
+	})
+}
+
+func (b *Builder) AddInt64Array(values ...int64) error {
+	return b.AddArrayFn(TypeInt64, len(values), func(ab *ArrayBuilder) error {
+		for _, v := range values {
+			ab.AddInt64(v)
+		}
+		return nil
+	})
+}
+
+func (b *Builder) AddFloat64Array(values ...float64) error {
+	return b.AddArrayFn(TypeFloat64, len(values), func(ab *ArrayBuilder) error {
+		for _, v := range values {
+			ab.AddFloat64(v)
+		}
+		return nil
+	})
+}
+
+const (
+	aTypeSize   = 1 // u8
+	aCountSize  = 2 // u16
+	aOffsetSize = 2 // u16
+)
+
+type ArrayBuilder struct {
+	buf          []byte
+	elemType     Type
+	count        int
+	valueIndex   int
+	isDynamic    bool
+	offsetsStart int
+	lastOffset   int
+
+	builderCache      *Builder
+	arrayBuilderCache *ArrayBuilder
+}
+
+func NewArrayBuilder(buf []byte, elemType Type, count int) *ArrayBuilder {
+	ab := &ArrayBuilder{buf: buf}
+	ab.Reset(elemType, count)
+	return ab
+}
+
+func (a *ArrayBuilder) Reset(elemType Type, count int) {
+	a.buf = a.buf[:0]
+	a.elemType = elemType
+	a.count = count
+	a.valueIndex = 0
+	a.lastOffset = 0
+	a.isDynamic = elemType == TypeString || elemType == TypeArray || elemType == TypeMap
+
+	headerSize := aTypeSize + aCountSize
+	if a.isDynamic {
+		headerSize += (count + 1) * aOffsetSize
+	}
+
+	if cap(a.buf) < headerSize {
+		a.buf = make([]byte, headerSize)
+	} else {
+		a.buf = a.buf[:headerSize]
+	}
+
+	a.buf[0] = byte(elemType)
+	binary.LittleEndian.PutUint16(a.buf[aTypeSize:], uint16(count))
+
+	if a.isDynamic {
+		a.offsetsStart = aTypeSize + aCountSize
+	}
+}
+
+func (a *ArrayBuilder) AddString(value string) {
+	binary.LittleEndian.PutUint16(a.buf[a.offsetsStart+a.valueIndex*aOffsetSize:], uint16(a.lastOffset))
+	a.valueIndex++
+	a.buf = append(a.buf, value...)
+	a.lastOffset += len(value)
+}
+
+func (a *ArrayBuilder) AddInt64(value int64) {
+	a.valueIndex++
+	pos := len(a.buf)
+	a.buf = append(a.buf, 0, 0, 0, 0, 0, 0, 0, 0)
+	binary.LittleEndian.PutUint64(a.buf[pos:], uint64(value))
+}
+
+func (a *ArrayBuilder) AddFloat64(value float64) {
+	a.valueIndex++
+	pos := len(a.buf)
+	a.buf = append(a.buf, 0, 0, 0, 0, 0, 0, 0, 0)
+	binary.LittleEndian.PutUint64(a.buf[pos:], math.Float64bits(value))
+}
+
+func (a *ArrayBuilder) AddBool(value bool) {
+	a.valueIndex++
+	if value {
+		a.buf = append(a.buf, 1)
+	} else {
+		a.buf = append(a.buf, 0)
+	}
+}
+
+func (a *ArrayBuilder) AddNull() {
+	// Add an offset of 0 for null values. The reader will interpret this as null.
+	binary.LittleEndian.PutUint16(a.buf[a.offsetsStart+a.valueIndex*aOffsetSize:], uint16(a.lastOffset))
+	a.valueIndex++
+}
+
+func (a *ArrayBuilder) AddRaw(value []byte) {
+	if a.isDynamic {
+		binary.LittleEndian.PutUint16(a.buf[a.offsetsStart+a.valueIndex*aOffsetSize:], uint16(a.lastOffset))
+		a.lastOffset += len(value)
+	}
+	a.valueIndex++
+	a.buf = append(a.buf, value...)
+}
+
+func (a *ArrayBuilder) AddBuilderFn(fn func(mb *Builder) error) error {
+	if a.builderCache == nil {
+		a.builderCache = NewBuilder(make([]byte, 0, 256))
+	} else {
+		a.builderCache.Reset()
+	}
+	if err := fn(a.builderCache); err != nil {
+		return err
+	}
+	m, err := a.builderCache.Build()
+	if err != nil {
+		return err
+	}
+	a.AddRaw(m)
+	return nil
+}
+
+func (a *ArrayBuilder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder) error) error {
+	if a.arrayBuilderCache == nil {
+		a.arrayBuilderCache = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
+	}
+	a.arrayBuilderCache.Reset(elemType, count)
+	if err := fn(a.arrayBuilderCache); err != nil {
+		return err
+	}
+	arr, err := a.arrayBuilderCache.Build()
+	if err != nil {
+		return err
+	}
+	a.AddRaw(arr)
+	return nil
+}
+
+func (a *ArrayBuilder) Build() ([]byte, error) {
+	if a.valueIndex != a.count {
+		return nil, fmt.Errorf("%w: expected %d elements, got %d", ErrArrayCountMismatch, a.count, a.valueIndex)
+	}
+	if a.isDynamic {
+		binary.LittleEndian.PutUint16(a.buf[a.offsetsStart+a.count*aOffsetSize:], uint16(a.lastOffset))
+	}
+	return a.buf, nil
 }

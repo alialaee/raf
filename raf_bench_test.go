@@ -7,30 +7,33 @@ import (
 )
 
 func BenchmarkBuilderBuild(b *testing.B) {
-	builder := NewBuilder()
 
-	keys := []string{
-		"age",
-		"city",
-		"is_active",
-		"name",
-		"score",
+	keys := []KeyType{
+		{"age", TypeInt64},
+		{"city", TypeString},
+		{"is_active", TypeBool},
+		{"name", TypeString},
+		{"score", TypeFloat64},
 	}
 
 	dst := make([]byte, 1024)
+	builder := NewBuilder(dst)
 
 	b.ReportAllocs()
 
 	for b.Loop() {
 		builder.Reset()
-		builder.AddInt64(keys[0], 30)
-		builder.AddString(keys[1], []byte("Berlin"))
-		builder.AddBool(keys[2], true)
-		builder.AddString(keys[3], []byte("Ali Alaee"))
-		builder.AddFloat64(keys[4], 99.5)
+
+		builder.AddKeys(keys...)
+
+		builder.AddInt64(30)
+		builder.AddString("Berlin")
+		builder.AddBool(true)
+		builder.AddString("AliAlaee")
+		builder.AddFloat64(99.5)
 
 		var err error
-		dst, err = builder.Build(dst)
+		dst, err = builder.Build()
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -39,13 +42,23 @@ func BenchmarkBuilderBuild(b *testing.B) {
 }
 
 func BenchmarkBlockGet(b *testing.B) {
-	builder := NewBuilder()
+	builder := NewBuilder(nil)
 
+	keys := make([]KeyType, 50)
 	for i := range 50 {
-		builder.AddInt64(fmt.Sprintf("key%02d", i), int64(i))
+		keys[i] = KeyType{
+			Name: fmt.Sprintf("key%02d", i),
+			Type: TypeInt64,
+		}
 	}
 
-	dst, err := builder.Build(nil)
+	builder.AddKeys(keys...)
+
+	for i := range 50 {
+		builder.AddInt64(int64(i))
+	}
+
+	dst, err := builder.Build()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -65,14 +78,25 @@ func BenchmarkBlockGet(b *testing.B) {
 }
 
 func BenchmarkLookup(b *testing.B) {
-	builder := NewBuilder()
-	builder.AddInt64("age", 30)
-	builder.AddStringString("city", "Berlin")
-	builder.AddBool("is_active", true)
-	builder.AddStringString("name", "Ali Alaee")
-	builder.AddFloat64("score", 99.5)
+	builder := NewBuilder(nil)
 
-	dst, err := builder.Build(nil)
+	keys := []KeyType{
+		{"age", TypeInt64},
+		{"city", TypeString},
+		{"is_active", TypeBool},
+		{"name", TypeString},
+		{"score", TypeFloat64},
+	}
+
+	builder.AddKeys(keys...)
+
+	builder.AddInt64(30)
+	builder.AddString("Berlin")
+	builder.AddBool(true)
+	builder.AddString("AliAlaee")
+	builder.AddFloat64(99.5)
+
+	dst, err := builder.Build()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -134,16 +158,16 @@ func BenchmarkExtract_JSON(b *testing.B) {
 }
 
 func BenchmarkArrayBuild(b *testing.B) {
-	builder := NewBuilder()
+	builder := NewBuilder(nil)
 
 	ints := make([]int64, 100)
 	for i := range ints {
 		ints[i] = int64(i * 70000000)
 	}
 
-	strs := make([][]byte, 50)
+	strs := make([]string, 50)
 	for i := range strs {
-		strs[i] = []byte("value_placeholder")
+		strs[i] = "value_placeholder"
 	}
 
 	dst := make([]byte, 8192)
@@ -152,11 +176,21 @@ func BenchmarkArrayBuild(b *testing.B) {
 
 	for b.Loop() {
 		builder.Reset()
-		builder.AddInt64Array("a_ints", ints)
-		builder.AddStringArray("b_strs", strs)
+		builder.AddKeys(
+			KeyType{
+				Name: "a_ints",
+				Type: TypeArray,
+			},
+			KeyType{
+				Name: "b_strs",
+				Type: TypeArray,
+			},
+		)
+		builder.AddInt64Array(ints...)
+		builder.AddStringArray(strs...)
 
 		var err error
-		dst, err = builder.Build(dst)
+		dst, err = builder.Build()
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -194,19 +228,29 @@ func BenchmarkArrayBuild_JSON(b *testing.B) {
 }
 
 func BenchmarkArrayRead(b *testing.B) {
-	builder := NewBuilder()
+	builder := NewBuilder(nil)
 
+	builder.AddKeys(
+		KeyType{
+			Name: "a_ints",
+			Type: TypeArray,
+		},
+		KeyType{
+			Name: "b_strs",
+			Type: TypeArray,
+		},
+	)
+
+	strs := []string{"string a", "string b", "string c", "string d"}
 	ints := make([]int64, 100)
 	for i := range ints {
 		ints[i] = int64(i * 7)
 	}
 
-	builder.AddInt64Array("a_ints", ints)
-	builder.AddStringArray("b_strs", [][]byte{
-		[]byte("hello"), []byte("world"), []byte("foo"), []byte("bar"),
-	})
+	builder.AddInt64Array(ints...)
+	builder.AddStringArray(strs...)
 
-	dst, err := builder.Build(nil)
+	dst, err := builder.Build()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -230,30 +274,45 @@ func BenchmarkArrayRead(b *testing.B) {
 }
 
 func BenchmarkMapBuild(b *testing.B) {
-	inner := NewBuilder()
-	outer := NewBuilder()
 	innerDst := make([]byte, 512)
 	outerDst := make([]byte, 1024)
 
+	inner := NewBuilder(innerDst)
+	outer := NewBuilder(outerDst)
+
 	b.ReportAllocs()
+
+	innerKeys := []KeyType{
+		{"city", TypeString},
+		{"name", TypeString},
+	}
+
+	outerKeys := []KeyType{
+		{"age", TypeInt64},
+		{"meta", TypeMap},
+		{"score", TypeFloat64},
+	}
 
 	for b.Loop() {
 		inner.Reset()
-		inner.AddStringString("city", "Berlin")
-		inner.AddStringString("name", "Ali")
+		inner.AddKeys(innerKeys...)
 
-		var err error
-		innerDst, err = inner.Build(innerDst)
+		inner.AddString("Berlin")
+		inner.AddString("Ali")
+
+		innerDst, err := inner.Build()
 		if err != nil {
 			b.Fatal(err)
 		}
 
 		outer.Reset()
-		outer.AddInt64("age", 30)
-		outer.AddMap("meta", innerDst)
-		outer.AddFloat64("score", 99.5)
+		outer.AddKeys(outerKeys...)
 
-		outerDst, err = outer.Build(outerDst)
+		outer.AddInt64(30)
+		outer.AddRaw(innerDst)
+		outer.AddFloat64(99.5)
+
+		outerDst, err = outer.Build()
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -262,22 +321,52 @@ func BenchmarkMapBuild(b *testing.B) {
 }
 
 func BenchmarkMapRead(b *testing.B) {
-	inner := NewBuilder()
-	inner.AddStringString("city", "Berlin")
-	inner.AddStringString("name", "Ali")
-	innerDst, _ := inner.Build(nil)
+	innerDst := make([]byte, 512)
+	outerDst := make([]byte, 1024)
 
-	outer := NewBuilder()
-	outer.AddInt64("age", 30)
-	outer.AddMap("meta", innerDst)
-	outer.AddFloat64("score", 99.5)
-	outerDst, _ := outer.Build(nil)
+	inner := NewBuilder(innerDst)
+	outer := NewBuilder(outerDst)
+
+	b.ReportAllocs()
+
+	innerKeys := []KeyType{
+		{"city", TypeString},
+		{"name", TypeString},
+	}
+
+	outerKeys := []KeyType{
+		{"age", TypeInt64},
+		{"meta", TypeMap},
+		{"score", TypeFloat64},
+	}
+
+	inner.AddKeys(innerKeys...)
+
+	inner.AddString("Berlin")
+	inner.AddString("Ali")
+
+	innerDst, err := inner.Build()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	outer.AddKeys(outerKeys...)
+
+	outer.AddInt64(30)
+	outer.AddRaw(innerDst)
+	outer.AddFloat64(99.5)
+
+	outerDst, err = outer.Build()
+	if err != nil {
+		b.Fatal(err)
+	}
 
 	block := NewBlock(outerDst)
 	metaKey := []byte("meta")
 	nameKey := []byte("name")
 
 	b.ReportAllocs()
+	b.ResetTimer()
 
 	for b.Loop() {
 		val, ok := block.Get(metaKey)
