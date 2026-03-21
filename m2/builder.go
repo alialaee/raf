@@ -92,10 +92,10 @@ var (
 )
 
 const (
-	Version        uint16 = 0xff01
-	hVersionSize          = 2
-	hSizeSize             = 4 // u32
-	hValOffsetSize        = 4 // u32
+	Version        = 0xff01
+	hVersionSize   = 2
+	hSizeSize      = 4 // u32
+	hValOffsetSize = 4 // u32
 )
 
 type Builder struct {
