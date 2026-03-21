@@ -4,18 +4,19 @@
 
 `raf` provides a simple, read-optimized binary format in Go.
 
-Designed for fast read access across a few kilobytes of data, keys are sorted lexicographically as raw bytes for quick retrieval.
+Designed for fast read access across a few kilobytes of data, keys are sorted lexicographically as raw bytes for quick retrieval. RAF can represent what JSON can.
 
 > [!NOTE]  
-> Originally part of a proprietary database engine, this was extracted into a standalone library to improve its ergonomics and add new features.
+> Originally part of a proprietary database engine, this was extracted into a standalone library to improve its ergonomics and add new features. Also take a look at its sister project for writing and reading sequential data (logs), [logfile](https://github.com/alialaee/logfile).
+
 
 ## Features
 
+- **Type-rich:** Supports types similar to JSON, see [Differences from JSON](#differences-from-json).
 - **Read-optimized:** Built for extremely fast sequential and random reads.
 - **Random lookup:** Retrieve specific fields without full deserialization.
 - **Simple:** The format is straightforward to parse and implement.
 - **Compact:** Low-overhead binary format.
-- **Type-rich:** Supports types similar to JSON, see [Differences from JSON](#differences-from-json).
 - **Schema-less**
 - **Canonical serialization:** Only one representation of a single data.
 - **Zero-allocation** by using `Builder` and `Block` and minimal allocations using `Marshal` and `Unmarshal`.
