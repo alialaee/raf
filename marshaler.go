@@ -5,60 +5,136 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 )
 
-type cachedField struct {
-	index int
-	name  string
+type valueAdder interface {
+	AddString(value string)
+	AddInt64(value int64)
+	AddFloat64(value float64)
+	AddBool(value bool)
+	AddNull()
+	AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder) error) error
+	AddBuilderFn(fn func(mb *Builder) error) error
+	AddRaw(value []byte)
+}
+
+type reflectField struct {
+	index      int
+	isNullable bool
+	kind       reflect.Kind
 }
 
 type structFields struct {
-	fields []cachedField  // sorted by name, for marshal
-	byName map[string]int // name to struct field index, for unmarshal
+	rafFields     []KeyType
+	reflectFields []reflectField
 }
 
-func computeStructFields(rt reflect.Type) *structFields {
+func (sf *structFields) Len() int {
+	return len(sf.rafFields)
+}
+
+func (sf *structFields) Swap(i, j int) {
+	sf.rafFields[i], sf.rafFields[j] = sf.rafFields[j], sf.rafFields[i]
+	sf.reflectFields[i], sf.reflectFields[j] = sf.reflectFields[j], sf.reflectFields[i]
+}
+
+func (sf *structFields) Less(i, j int) bool {
+	return sf.rafFields[i].Name < sf.rafFields[j].Name
+}
+
+func computeStructFields(rt reflect.Type) (*structFields, error) {
 	n := rt.NumField()
-	fields := make([]cachedField, 0, n)
-	byName := make(map[string]int, n)
+	rafFields := make([]KeyType, 0, n)
+	reflectFields := make([]reflectField, 0, n)
+
 	for i := range n {
 		f := rt.Field(i)
 		name, skip := fieldName(f)
 		if skip {
 			continue
 		}
-		fields = append(fields, cachedField{index: i, name: name})
-		byName[name] = i
+
+		rafType, err := reflectTypeToRAFType(f.Type)
+		if err != nil {
+			return nil, errors.New("raf: unsupported field type " + f.Type.String() + " for field " + f.Name)
+		}
+
+		rafFields = append(rafFields, KeyType{Name: name, Type: rafType})
+		reflectFields = append(reflectFields, reflectField{index: i, isNullable: isNullableType(f.Type), kind: f.Type.Kind()})
 	}
-	sort.Slice(fields, func(i, j int) bool {
-		return fields[i].name < fields[j].name
-	})
-	return &structFields{fields: fields, byName: byName}
+
+	// Sort fields by name for deterministic encoding order
+	structFields := &structFields{rafFields: rafFields, reflectFields: reflectFields}
+	sort.Stable(structFields)
+	return structFields, nil
 }
 
-// Marshaler encodes Go values to RAF format, caching reflect metadata for struct types.
-// A zero-value Marshaler is ready to use.
+func isNullableType(rt reflect.Type) bool {
+	switch rt.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Interface:
+		return true
+	}
+	return false
+}
+
+func reflectTypeToRAFType(rt reflect.Type) (Type, error) {
+	for rt.Kind() == reflect.Pointer {
+		rt = rt.Elem()
+	}
+
+	switch rt.Kind() {
+	case reflect.Bool:
+		return TypeBool, nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return TypeInt64, nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return TypeInt64, nil
+	case reflect.Float32, reflect.Float64:
+		return TypeFloat64, nil
+	case reflect.String:
+		return TypeString, nil
+	case reflect.Slice:
+		return TypeArray, nil
+	case reflect.Map:
+		if rt.Key().Kind() == reflect.String {
+			return TypeMap, nil
+		} else {
+			return 0, errors.New("raf: map key must be string")
+		}
+	case reflect.Struct:
+		return TypeMap, nil
+	}
+
+	return 0, errors.New("raf: unsupported type " + rt.String())
+}
+
 type Marshaler struct {
-	cache       sync.Map // reflect.Type to *structFields
-	builderPool *sync.Pool
+	builderPool      *sync.Pool
+	arrayBuilderPool *sync.Pool
+	structCache      sync.Map // reflect.Type to *structFields
 }
 
-func (m *Marshaler) getStructFields(rt reflect.Type) *structFields {
-	if v, ok := m.cache.Load(rt); ok {
-		return v.(*structFields)
+func NewMarshaler() *Marshaler {
+	return &Marshaler{
+		builderPool: &sync.Pool{
+			New: func() any {
+				return NewBuilder(make([]byte, 0, 1024))
+			},
+		},
+		arrayBuilderPool: &sync.Pool{
+			New: func() any {
+				return NewArrayBuilder(make([]byte, 0, 256), TypeString, 0)
+			},
+		},
 	}
-	sf := computeStructFields(rt)
-	v, _ := m.cache.LoadOrStore(rt, sf)
-	return v.(*structFields)
 }
 
-// Marshal returns the RAF encoding of v.
-// v must be a struct, a map with string keys, or a pointer to one of them.
 func (m *Marshaler) Marshal(v any) ([]byte, error) {
-	if m.builderPool == nil {
-		m.builderPool = &sync.Pool{New: func() any { return NewBuilder() }}
-	}
+	builder := m.builderPool.Get().(*Builder)
+	defer m.builderPool.Put(builder)
+	builder.Reset()
 
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
@@ -69,154 +145,337 @@ func (m *Marshaler) Marshal(v any) ([]byte, error) {
 		if rv.IsNil() {
 			return nil, errors.New("raf: Marshal called with nil pointer or interface")
 		}
-		rv = rv.Elem()
+
+		rv = rv.Elem() // TODO let's have a for loop here
 	}
 
-	if rv.Kind() != reflect.Map && rv.Kind() != reflect.Struct {
+	switch rv.Kind() {
+	case reflect.Struct:
+		if err := m.marshalStruct(builder, rv); err != nil {
+			return nil, err
+		}
+	case reflect.Map:
+		if err := m.marshalMap(builder, rv); err != nil {
+			return nil, err
+		}
+	default:
 		return nil, errors.New("raf: Marshal called with unsupported root type, must be struct or map")
 	}
 
-	builder := m.builderPool.Get().(*Builder)
-	defer m.builderPool.Put(builder)
-	builder.Reset()
-
-	if err := m.marshalMapOrStruct(builder, rv); err != nil {
+	data, err := builder.Build()
+	if err != nil {
 		return nil, err
 	}
-	return builder.Build(nil)
+
+	// Copy data to a new slice.
+	result := make([]byte, len(data))
+	copy(result, data)
+
+	return result, nil
 }
 
-func (m *Marshaler) marshalToBuilder(builder *Builder, rv reflect.Value, key string) error {
+func (m *Marshaler) marshalStruct(builder *Builder, rv reflect.Value) error {
+	structFields, err := m.structFieldsForType(rv.Type())
+	if err != nil {
+		return err
+	}
+
+	// Write keys
+	builder.AddKeys(structFields.rafFields...)
+
+	// Write values
+	for _, rf := range structFields.reflectFields {
+		fieldValue := rv.Field(rf.index)
+		if rf.isNullable && fieldValue.IsNil() {
+			builder.AddNull()
+			continue
+		}
+
+		switch rf.kind {
+		case reflect.String:
+			builder.AddString(fieldValue.String())
+			continue
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			builder.AddInt64(fieldValue.Int())
+			continue
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			builder.AddInt64(int64(fieldValue.Uint()))
+			continue
+		case reflect.Float32, reflect.Float64:
+			builder.AddFloat64(fieldValue.Float())
+			continue
+		case reflect.Bool:
+			builder.AddBool(fieldValue.Bool())
+			continue
+		}
+
+		if err := m.marshalValue(builder, fieldValue); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+type mapEntry struct {
+	kt  KeyType
+	val reflect.Value
+}
+
+func (m *Marshaler) marshalMap(builder *Builder, rv reflect.Value) error {
+	if rv.Type().Key().Kind() != reflect.String {
+		return errors.New("raf: map key must be string")
+	}
+
+	n := rv.Len()
+	entries := make([]mapEntry, 0, n)
+
+	iter := rv.MapRange()
+	for iter.Next() {
+		v := iter.Value()
+		for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+			if v.IsNil() {
+				break
+			}
+			v = v.Elem()
+		}
+
+		rafType, err := reflectTypeToRAFType(v.Type())
+		if err != nil {
+			return fmt.Errorf("raf: unsupported map value type %s for key %q", v.Type().String(), iter.Key().String())
+		}
+
+		entries = append(entries, mapEntry{
+			kt:  KeyType{Name: iter.Key().String(), Type: rafType},
+			val: v,
+		})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].kt.Name < entries[j].kt.Name
+	})
+
+	// Build KeyType slice from sorted entries
+	keys := make([]KeyType, n)
+	for i := range entries {
+		keys[i] = entries[i].kt
+	}
+	builder.AddKeys(keys...)
+
+	// Write values in sorted order
+	for _, e := range entries {
+		if err := m.marshalValue(builder, e.val); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *Marshaler) marshalMapValue(va valueAdder, rv reflect.Value) error {
+	innerBuilder := m.builderPool.Get().(*Builder)
+	innerBuilder.Reset()
+
+	err := m.marshalMap(innerBuilder, rv)
+	if err != nil {
+		m.builderPool.Put(innerBuilder)
+		return err
+	}
+
+	data, err := innerBuilder.Build()
+	if err != nil {
+		m.builderPool.Put(innerBuilder)
+		return err
+	}
+	va.AddRaw(data)
+	m.builderPool.Put(innerBuilder)
+	return nil
+}
+
+func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
 	for rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface {
 		if rv.IsNil() {
-			return builder.AddNull(key)
+			va.AddNull()
+			return nil
 		}
 		rv = rv.Elem()
 	}
 
 	switch rv.Kind() {
-	case reflect.String:
-		return builder.AddStringString(key, rv.String())
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return builder.AddInt64(key, rv.Int())
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return builder.AddInt64(key, int64(rv.Uint()))
-	case reflect.Float32, reflect.Float64:
-		return builder.AddFloat64(key, rv.Float())
 	case reflect.Bool:
-		return builder.AddBool(key, rv.Bool())
-	case reflect.Map, reflect.Struct:
-		if rv.Kind() == reflect.Map && rv.IsNil() {
-			return builder.AddNull(key)
-		}
-		return builder.AddMapFn(key, func(inner *Builder) error {
-			return m.marshalMapOrStruct(inner, rv)
-		})
-	case reflect.Slice, reflect.Array:
-		if rv.Kind() == reflect.Slice && rv.IsNil() {
-			return builder.AddNull(key)
-		}
-		return m.marshalArray(builder, rv, key)
-	default:
-		return fmt.Errorf("raf: unsupported type %s", rv.Type().String())
-	}
-}
+		va.AddBool(rv.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		va.AddInt64(rv.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		va.AddInt64(int64(rv.Uint()))
+	case reflect.Float32, reflect.Float64:
+		va.AddFloat64(rv.Float())
+	case reflect.String:
+		va.AddString(rv.String())
+	case reflect.Struct:
+		innerBuilder := m.builderPool.Get().(*Builder)
+		innerBuilder.Reset()
 
-func (m *Marshaler) marshalMapOrStruct(builder *Builder, rv reflect.Value) error {
-	if rv.Kind() == reflect.Struct {
-		sf := m.getStructFields(rv.Type())
-		for _, f := range sf.fields {
-			if err := m.marshalToBuilder(builder, rv.Field(f.index), f.name); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	type kv struct {
-		key string
-		val reflect.Value
-	}
-
-	if rv.Type().Key().Kind() != reflect.String {
-		return errors.New("raf: map key must be string")
-	}
-
-	pairs := make([]kv, 0, rv.Len())
-	for _, k := range rv.MapKeys() {
-		pairs = append(pairs, kv{key: k.String(), val: rv.MapIndex(k)})
-	}
-
-	sort.Slice(pairs, func(i, j int) bool {
-		return pairs[i].key < pairs[j].key
-	})
-
-	for _, p := range pairs {
-		if err := m.marshalToBuilder(builder, p.val, p.key); err != nil {
+		err := m.marshalStruct(innerBuilder, rv)
+		if err != nil {
+			m.builderPool.Put(innerBuilder)
 			return err
 		}
+
+		data, err := innerBuilder.Build()
+		if err != nil {
+			m.builderPool.Put(innerBuilder)
+			return err
+		}
+		va.AddRaw(data)
+		m.builderPool.Put(innerBuilder)
+	case reflect.Map:
+		if rv.IsNil() {
+			va.AddNull()
+			return nil
+		}
+		return m.marshalMapValue(va, rv)
+	case reflect.Slice:
+		count := rv.Len()
+		elemType := rv.Type().Elem()
+		isNullable := false
+		if elemType.Kind() == reflect.Pointer {
+			isNullable = true
+		}
+
+		rafElemType, err := reflectTypeToRAFType(elemType)
+		if err != nil {
+			return err
+		}
+
+		innerArrayBuilder := m.arrayBuilderPool.Get().(*ArrayBuilder)
+		innerArrayBuilder.Reset(rafElemType, count)
+
+		elemKind := elemType.Kind()
+		for elemKind == reflect.Pointer {
+			elemKind = elemType.Elem().Kind()
+		}
+
+		switch elemKind {
+		case reflect.String:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddString(elemValue.String())
+			}
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddInt64(elemValue.Int())
+			}
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddInt64(int64(elemValue.Uint()))
+			}
+		case reflect.Float32, reflect.Float64:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddFloat64(elemValue.Float())
+			}
+		case reflect.Bool:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+				innerArrayBuilder.AddBool(elemValue.Bool())
+			}
+		default:
+			for i := range count {
+				elemValue := rv.Index(i)
+				if isNullable && elemValue.IsNil() {
+					innerArrayBuilder.AddNull()
+					continue
+				}
+				for elemValue.Kind() == reflect.Pointer {
+					elemValue = elemValue.Elem()
+				}
+
+				if err := m.marshalValue(innerArrayBuilder, elemValue); err != nil {
+					m.arrayBuilderPool.Put(innerArrayBuilder)
+					return err
+				}
+			}
+		}
+
+		innerArrayBuilderData, err := innerArrayBuilder.Build()
+		if err != nil {
+			m.arrayBuilderPool.Put(innerArrayBuilder)
+			return err
+		}
+
+		va.AddRaw(innerArrayBuilderData)
+		m.arrayBuilderPool.Put(innerArrayBuilder)
+
+	default:
+		return fmt.Errorf("raf: unsupported value type %s", rv.Type().String())
 	}
+
 	return nil
 }
 
-func (m *Marshaler) marshalArray(builder *Builder, rv reflect.Value, key string) error {
-	if rv.Len() == 0 {
-		return builder.AddStringArray(key, nil)
+func (m *Marshaler) structFieldsForType(rt reflect.Type) (*structFields, error) {
+	if cached, ok := m.structCache.Load(rt); ok {
+		return cached.(*structFields), nil
 	}
 
-	elemType := rv.Type().Elem()
-	kind := elemType.Kind()
-
-	for kind == reflect.Pointer {
-		elemType = elemType.Elem()
-		kind = elemType.Kind()
+	fields, err := computeStructFields(rt)
+	if err != nil {
+		return nil, err
 	}
 
-	switch kind {
-	case reflect.String:
-		vals := make([]string, rv.Len())
-		for i := range rv.Len() {
-			vals[i] = indirect(rv.Index(i)).String()
-		}
-		return builder.AddStringStringArray(key, vals)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		vals := make([]int64, rv.Len())
-		for i := range rv.Len() {
-			vals[i] = indirect(rv.Index(i)).Int()
-		}
-		return builder.AddInt64Array(key, vals)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		vals := make([]int64, rv.Len())
-		for i := range rv.Len() {
-			vals[i] = int64(indirect(rv.Index(i)).Uint())
-		}
-		return builder.AddInt64Array(key, vals)
-	case reflect.Float32, reflect.Float64:
-		vals := make([]float64, rv.Len())
-		for i := range rv.Len() {
-			vals[i] = indirect(rv.Index(i)).Float()
-		}
-		return builder.AddFloat64Array(key, vals)
-	case reflect.Bool:
-		vals := make([]bool, rv.Len())
-		for i := range rv.Len() {
-			vals[i] = indirect(rv.Index(i)).Bool()
-		}
-		return builder.AddBoolArray(key, vals)
-	case reflect.Map, reflect.Struct:
-		return builder.addMapArrayFromFn(key, rv.Len(), func(i int, inner *Builder) error {
-			return m.marshalMapOrStruct(inner, indirect(rv.Index(i)))
-		})
-	}
-	return fmt.Errorf("raf: unsupported array element type %s", elemType.String())
+	m.structCache.Store(rt, fields)
+	return fields, nil
 }
 
-func indirect(v reflect.Value) reflect.Value {
-	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
-		if v.IsNil() {
-			return reflect.Zero(v.Type().Elem())
-		}
-		v = v.Elem()
+func fieldName(f reflect.StructField) (name string, skip bool) {
+	tag := f.Tag.Get("raf")
+	if !f.IsExported() {
+		return "", true
 	}
-	return v
+	if tag == "-" {
+		return "", true
+	}
+	name = tag
+	if name == "" {
+		name = strings.ToLower(f.Name)
+	}
+	return name, false
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
-	"strings"
 	"sync"
 	"unsafe"
 )
@@ -85,7 +84,7 @@ type unmarshalOP struct {
 }
 
 func (u *Unmarshaler) Unmarshal(data []byte, v any) error {
-	block := Block(data)
+	block := NewBlock(data)
 	if !block.Valid() {
 		return ErrInvalidRAFData
 	}
@@ -127,8 +126,6 @@ func unmarshalValueToAny(val Value) any {
 		return val.Float64()
 	case TypeBool:
 		return val.Bool()
-	case TypeNull:
-		return nil
 	case TypeMap:
 		return unmarshalBlockToMap(val.Map())
 	case TypeArray:
@@ -224,8 +221,6 @@ func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
 
 func typeCompatible(valType Type, targetKind reflect.Kind) bool {
 	switch valType {
-	case TypeNull:
-		return true
 	case TypeString:
 		return targetKind == reflect.String
 	case TypeInt64:
@@ -260,14 +255,16 @@ func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data Block, base unsafe.Point
 		val := data.ValueAt(dataI)
 		targetKind := op.targetKind
 
-		if op.kind == reflect.Pointer {
-			fieldValue := reflect.NewAt(op.fieldType, fieldPtr).Elem()
-			if val.IsNull() {
-				fieldValue.SetZero()
+		if len(val.Data) == 0 {
+			if op.kind == reflect.Pointer {
 				opsI++
 				dataI++
 				continue
 			}
+		}
+
+		if op.kind == reflect.Pointer {
+			fieldValue := reflect.NewAt(op.fieldType, fieldPtr).Elem()
 			if fieldValue.IsNil() {
 				fieldValue.Set(reflect.New(op.targetType))
 			}
@@ -308,12 +305,14 @@ func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data Block, base unsafe.Point
 		case reflect.String:
 			*(*string)(fieldPtr) = val.String()
 		case reflect.Struct:
+			if len(val.Data) == 0 {
+				break
+			}
 			if err := u.unmarshal(op.nested, val.Map(), fieldPtr); err != nil {
 				return err
 			}
 		case reflect.Slice:
-			if val.IsNull() {
-				reflect.NewAt(op.targetType, fieldPtr).Elem().SetZero()
+			if len(val.Data) == 0 {
 				break
 			}
 			arr := val.Array()
@@ -384,19 +383,4 @@ func (u *Unmarshaler) loadOPs(typ reflect.Type) []unmarshalOP {
 		u.opsCache.Store(typ, ops)
 	}
 	return ops.([]unmarshalOP)
-}
-
-func fieldName(f reflect.StructField) (name string, skip bool) {
-	tag := f.Tag.Get("raf")
-	if !f.IsExported() {
-		return "", true
-	}
-	if tag == "-" {
-		return "", true
-	}
-	name = tag
-	if name == "" {
-		name = strings.ToLower(f.Name)
-	}
-	return name, false
 }
