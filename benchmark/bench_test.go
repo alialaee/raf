@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math/rand"
 	"testing"
 
 	"github.com/alialaee/raf"
@@ -10,174 +11,84 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-var players []Player
+var rngSource = rand.NewSource(42)
+var rng = rand.New(rngSource)
 
-func init() {
-	players = createRecords(1000)
-}
+type Marshaler func(v any) ([]byte, error)
+type Unmarshaler func(data []byte, v any) error
 
-func BenchmarkRAF_Marshal(b *testing.B) {
+func benchmarkMarshal[V any](b *testing.B, marshaler Marshaler, objects []V) {
+	b.Helper()
+	b.ReportAllocs()
 	for i := range b.N {
-		_, err := raf.Marshal(players[i%len(players)])
+		_, err := marshaler(objects[i%len(objects)])
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkMsgPack_Marshal(b *testing.B) {
-	for i := range b.N {
-		_, err := msgpack.Marshal(players[i%len(players)])
+func benchmarkUnmarshal[V any](b *testing.B, marshaler Marshaler, unmarshaler Unmarshaler, objects []V) {
+	b.Helper()
+	marshaledObjects := make([][]byte, len(objects))
+	for i, obj := range objects {
+		data, err := marshaler(obj)
 		if err != nil {
 			b.Fatal(err)
 		}
-	}
-}
-
-func BenchmarkJSON_Marshal(b *testing.B) {
-	for i := range b.N {
-		_, err := json.Marshal(players[i%len(players)])
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkCBOR_Marshal(b *testing.B) {
-	for i := range b.N {
-		_, err := cbor.Marshal(players[i%len(players)])
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkBSON_Marshal(b *testing.B) {
-	for i := range b.N {
-		_, err := bson.Marshal(players[i%len(players)])
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkRAF_Unmarshal(b *testing.B) {
-	marshaledPlayers := make([][]byte, len(players))
-	for i, p := range players {
-		data, err := raf.Marshal(p)
-		if err != nil {
-			b.Fatal(err)
-		}
-		marshaledPlayers[i] = data
+		marshaledObjects[i] = data
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := range b.N {
-		var p Player
-		err := raf.Unmarshal(marshaledPlayers[i%len(players)], &p)
+		var obj V
+		err := unmarshaler(marshaledObjects[i%len(objects)], &obj)
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
-func BenchmarkRAF_Lookup_Name(b *testing.B) {
-	marshaledPlayers := make([][]byte, len(players))
-	for i, p := range players {
-		data, err := raf.Marshal(p)
-		if err != nil {
-			b.Fatal(err)
-		}
-		marshaledPlayers[i] = data
+func benchmarkAllMarshals[V any](b *testing.B, objects []V) {
+	b.Helper()
+	marshalers := map[string]Marshaler{
+		"RAF":     raf.Marshal,
+		"JSON":    json.Marshal,
+		"MsgPack": msgpack.Marshal,
+		"CBOR":    cbor.Marshal,
+		"BSON":    bson.Marshal,
 	}
 
-	b.ResetTimer()
-	for i := range b.N {
-		block := raf.NewBlock(marshaledPlayers[i%len(players)])
-		_, found := block.Get([]byte("name"))
-		if !found {
-			b.Fatal("key not found")
-		}
-	}
-
-}
-
-func BenchmarkJSON_Unmarshal(b *testing.B) {
-	marshaledPlayers := make([][]byte, len(players))
-	for i, p := range players {
-		data, err := json.Marshal(p)
-		if err != nil {
-			b.Fatal(err)
-		}
-		marshaledPlayers[i] = data
-	}
-
-	b.ResetTimer()
-	for i := range b.N {
-		var p Player
-		err := json.Unmarshal(marshaledPlayers[i%len(players)], &p)
-		if err != nil {
-			b.Fatal(err)
-		}
+	for name, m := range marshalers {
+		b.Run(name, func(b *testing.B) {
+			benchmarkMarshal(b, m, objects)
+		})
 	}
 }
 
-func BenchmarkMsgPack_Unmarshal(b *testing.B) {
-	marshaledPlayers := make([][]byte, len(players))
-	for i, p := range players {
-		data, err := msgpack.Marshal(p)
-		if err != nil {
-			b.Fatal(err)
-		}
-		marshaledPlayers[i] = data
+func benchmarkAllUnmarshals[V any](b *testing.B, objects []V) {
+	b.Helper()
+	marshalers := map[string]Marshaler{
+		"RAF":     raf.Marshal,
+		"JSON":    json.Marshal,
+		"MsgPack": msgpack.Marshal,
+		"CBOR":    cbor.Marshal,
+		"BSON":    bson.Marshal,
 	}
 
-	b.ResetTimer()
-	for i := range b.N {
-		var p Player
-		err := msgpack.Unmarshal(marshaledPlayers[i%len(players)], &p)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkCBOR_Unmarshal(b *testing.B) {
-	marshaledPlayers := make([][]byte, len(players))
-	for i, p := range players {
-		data, err := cbor.Marshal(p)
-		if err != nil {
-			b.Fatal(err)
-		}
-		marshaledPlayers[i] = data
+	unmarshalers := map[string]Unmarshaler{
+		"RAF":     raf.Unmarshal,
+		"JSON":    json.Unmarshal,
+		"MsgPack": msgpack.Unmarshal,
+		"CBOR":    cbor.Unmarshal,
+		"BSON":    bson.Unmarshal,
 	}
 
-	b.ResetTimer()
-	for i := range b.N {
-		var p Player
-		err := cbor.Unmarshal(marshaledPlayers[i%len(players)], &p)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkBSON_Unmarshal(b *testing.B) {
-	marshaledPlayers := make([][]byte, len(players))
-	for i, p := range players {
-		data, err := bson.Marshal(p)
-		if err != nil {
-			b.Fatal(err)
-		}
-		marshaledPlayers[i] = data
-	}
-
-	b.ResetTimer()
-	for i := range b.N {
-		var p Player
-		err := bson.Unmarshal(marshaledPlayers[i%len(players)], &p)
-		if err != nil {
-			b.Fatal(err)
-		}
+	for name, m := range marshalers {
+		u := unmarshalers[name]
+		b.Run(name, func(b *testing.B) {
+			benchmarkUnmarshal(b, m, u, objects)
+		})
 	}
 }

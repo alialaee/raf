@@ -2,11 +2,40 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
+	"testing"
+
+	"github.com/alialaee/raf"
 )
 
-var rngSource = rand.NewSource(42)
-var rng = rand.New(rngSource)
+var players []Player = generatePlayers(1000)
+
+func BenchmarkAllMarshals_Player(b *testing.B) {
+	benchmarkAllMarshals(b, players)
+}
+
+func BenchmarkAllUnmarshals_Player(b *testing.B) {
+	benchmarkAllUnmarshals(b, players)
+}
+
+func BenchmarkRAF_Lookup_Players(b *testing.B) {
+	marshaledPlayers := make([][]byte, len(players))
+	for i, p := range players {
+		data, err := raf.Marshal(p)
+		if err != nil {
+			b.Fatal(err)
+		}
+		marshaledPlayers[i] = data
+	}
+
+	b.ResetTimer()
+	for i := range b.N {
+		block := raf.NewBlock(marshaledPlayers[i%len(players)])
+		_, found := block.Get([]byte("name"))
+		if !found {
+			b.Fatal("key not found")
+		}
+	}
+}
 
 type ItemType int
 
@@ -19,35 +48,35 @@ const (
 )
 
 type Player struct {
-	ID          int    `json:"id" raf:"id"`
-	Name        string `json:"name" raf:"name"`
-	Items       []Item `json:"items" raf:"items"`
-	Weapon      Item   `json:"weapon" raf:"weapon"`
-	Armors      Armors `json:"armors" raf:"armors"`
-	Health      int    `json:"health" raf:"health"`
-	Mana        int    `json:"mana" raf:"mana"`
-	Level       int    `json:"level" raf:"level"`
-	CanFly      bool   `json:"can_fly" raf:"can_fly"`
-	CanSwim     bool   `json:"can_swim" raf:"can_swim"`
-	CanTeleport bool   `json:"can_teleport" raf:"can_teleport"`
+	ID          int          `json:"id" raf:"id"`
+	Name        string       `json:"name" raf:"name"`
+	Items       []PlayerItem `json:"items" raf:"items"`
+	Weapon      PlayerItem   `json:"weapon" raf:"weapon"`
+	Armors      PlayerArmors `json:"armors" raf:"armors"`
+	Health      int          `json:"health" raf:"health"`
+	Mana        int          `json:"mana" raf:"mana"`
+	Level       int          `json:"level" raf:"level"`
+	CanFly      bool         `json:"can_fly" raf:"can_fly"`
+	CanSwim     bool         `json:"can_swim" raf:"can_swim"`
+	CanTeleport bool         `json:"can_teleport" raf:"can_teleport"`
 
 	Friends []string `json:"friends" raf:"friends"`
 }
 
-type Item struct {
+type PlayerItem struct {
 	ID   int      `json:"id" raf:"id"`
 	Name string   `json:"name" raf:"name"`
 	Type ItemType `json:"type" raf:"type"`
 }
 
-type Armors struct {
-	Head  Item `json:"head" raf:"head"`
-	Body  Item `json:"body" raf:"body"`
-	Legs  Item `json:"legs" raf:"legs"`
-	Arms  Item `json:"arms" raf:"arms"`
-	Feet  Item `json:"feet" raf:"feet"`
-	Ring1 Item `json:"ring1" raf:"ring1"`
-	Ring2 Item `json:"ring2" raf:"ring2"`
+type PlayerArmors struct {
+	Head  PlayerItem `json:"head" raf:"head"`
+	Body  PlayerItem `json:"body" raf:"body"`
+	Legs  PlayerItem `json:"legs" raf:"legs"`
+	Arms  PlayerItem `json:"arms" raf:"arms"`
+	Feet  PlayerItem `json:"feet" raf:"feet"`
+	Ring1 PlayerItem `json:"ring1" raf:"ring1"`
+	Ring2 PlayerItem `json:"ring2" raf:"ring2"`
 }
 
 var itemNamesByType = map[ItemType][]string{
@@ -73,7 +102,7 @@ var playerNames = []string{
 
 func randomPlayer() Player {
 	level := rng.Intn(60) + 1
-	items := make([]Item, rng.Intn(10)+5)
+	items := make([]PlayerItem, rng.Intn(10)+5)
 
 	for i := range items {
 		items[i] = randomItem(ItemType(rng.Intn(int(ItemMisc) + 1)))
@@ -100,8 +129,8 @@ func randomPlayer() Player {
 	}
 }
 
-func randomArmors() Armors {
-	return Armors{
+func randomArmors() PlayerArmors {
+	return PlayerArmors{
 		Head:  randomNamedArmor("Helm"),
 		Body:  randomNamedArmor("Chestplate"),
 		Legs:  randomNamedArmor("Greaves"),
@@ -112,25 +141,25 @@ func randomArmors() Armors {
 	}
 }
 
-func randomNamedArmor(name string) Item {
-	return Item{
+func randomNamedArmor(name string) PlayerItem {
+	return PlayerItem{
 		ID:   rng.Intn(1_000_000) + 1,
 		Name: name,
 		Type: ItemArmor,
 	}
 }
 
-func randomItem(itemType ItemType) Item {
+func randomItem(itemType ItemType) PlayerItem {
 	names := itemNamesByType[itemType]
 
-	return Item{
+	return PlayerItem{
 		ID:   rng.Intn(1_000_000) + 1,
 		Name: names[rng.Intn(len(names))],
 		Type: itemType,
 	}
 }
 
-func createRecords(count int) []Player {
+func generatePlayers(count int) []Player {
 	records := make([]Player, count)
 	for i := range records {
 		records[i] = randomPlayer()
