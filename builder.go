@@ -206,15 +206,12 @@ func (b *Builder) AddNull() {
 }
 
 func (b *Builder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder) error) error {
-	if b.cachedArrayBuilder == nil {
-		b.cachedArrayBuilder = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
-	} else {
-		b.cachedArrayBuilder.Reset(elemType, count)
-	}
-	if err := fn(b.cachedArrayBuilder); err != nil {
+	ab := b.InnerArrayBuilder(elemType, count)
+
+	if err := fn(ab); err != nil {
 		return err
 	}
-	arr, err := b.cachedArrayBuilder.Build()
+	arr, err := ab.Build()
 	if err != nil {
 		return err
 	}
@@ -223,20 +220,37 @@ func (b *Builder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder)
 }
 
 func (b *Builder) AddBuilderFn(fn func(mb *Builder) error) error {
-	if b.cachedBuilder == nil {
-		b.cachedBuilder = NewBuilder(make([]byte, 0, 256))
-	} else {
-		b.cachedBuilder.Reset()
-	}
-	if err := fn(b.cachedBuilder); err != nil {
+	builder := b.InnerBuilder()
+
+	if err := fn(builder); err != nil {
 		return err
 	}
-	m, err := b.cachedBuilder.Build()
+	m, err := builder.Build()
 	if err != nil {
 		return err
 	}
 	b.AddRaw(m)
 	return nil
+}
+
+// InnerBuilder returns a reusable builder for building nested structures.
+// This is a helper function.
+func (b *Builder) InnerBuilder() *Builder {
+	if b.cachedBuilder == nil {
+		b.cachedBuilder = NewBuilder(make([]byte, 0, 256))
+	}
+	b.cachedBuilder.Reset()
+	return b.cachedBuilder
+}
+
+// InnerArrayBuilder returns a reusable array builder for building nested arrays.
+// This is a helper function.
+func (b *Builder) InnerArrayBuilder(elemType Type, count int) *ArrayBuilder {
+	if b.cachedArrayBuilder == nil {
+		b.cachedArrayBuilder = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
+	}
+	b.cachedArrayBuilder.Reset(elemType, count)
+	return b.cachedArrayBuilder
 }
 
 func (b *Builder) Build() ([]byte, error) {
@@ -399,15 +413,12 @@ func (a *ArrayBuilder) AddRaw(value []byte) {
 }
 
 func (a *ArrayBuilder) AddBuilderFn(fn func(mb *Builder) error) error {
-	if a.builderCache == nil {
-		a.builderCache = NewBuilder(make([]byte, 0, 256))
-	} else {
-		a.builderCache.Reset()
-	}
-	if err := fn(a.builderCache); err != nil {
+	builder := a.InnerBuilder()
+
+	if err := fn(builder); err != nil {
 		return err
 	}
-	m, err := a.builderCache.Build()
+	m, err := builder.Build()
 	if err != nil {
 		return err
 	}
@@ -416,19 +427,33 @@ func (a *ArrayBuilder) AddBuilderFn(fn func(mb *Builder) error) error {
 }
 
 func (a *ArrayBuilder) AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder) error) error {
-	if a.arrayBuilderCache == nil {
-		a.arrayBuilderCache = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
-	}
-	a.arrayBuilderCache.Reset(elemType, count)
-	if err := fn(a.arrayBuilderCache); err != nil {
+	ab := a.InnerArrayBuilder(elemType, count)
+
+	if err := fn(ab); err != nil {
 		return err
 	}
-	arr, err := a.arrayBuilderCache.Build()
+	arr, err := ab.Build()
 	if err != nil {
 		return err
 	}
 	a.AddRaw(arr)
 	return nil
+}
+
+func (a *ArrayBuilder) InnerBuilder() *Builder {
+	if a.builderCache == nil {
+		a.builderCache = NewBuilder(make([]byte, 0, 256))
+	}
+	a.builderCache.Reset()
+	return a.builderCache
+}
+
+func (a *ArrayBuilder) InnerArrayBuilder(elemType Type, count int) *ArrayBuilder {
+	if a.arrayBuilderCache == nil {
+		a.arrayBuilderCache = NewArrayBuilder(make([]byte, 0, 256), elemType, count)
+	}
+	a.arrayBuilderCache.Reset(elemType, count)
+	return a.arrayBuilderCache
 }
 
 func (a *ArrayBuilder) Build() ([]byte, error) {

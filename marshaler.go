@@ -18,6 +18,9 @@ type valueAdder interface {
 	AddArrayFn(elemType Type, count int, fn func(ab *ArrayBuilder) error) error
 	AddBuilderFn(fn func(mb *Builder) error) error
 	AddRaw(value []byte)
+
+	InnerBuilder() *Builder
+	InnerArrayBuilder(elemType Type, count int) *ArrayBuilder
 }
 
 type reflectField struct {
@@ -273,22 +276,17 @@ func (m *Marshaler) marshalMap(builder *Builder, rv reflect.Value) error {
 }
 
 func (m *Marshaler) marshalMapValue(va valueAdder, rv reflect.Value) error {
-	innerBuilder := m.builderPool.Get().(*Builder)
-	innerBuilder.Reset()
-
+	innerBuilder := va.InnerBuilder()
 	err := m.marshalMap(innerBuilder, rv)
 	if err != nil {
-		m.builderPool.Put(innerBuilder)
 		return err
 	}
 
 	data, err := innerBuilder.Build()
 	if err != nil {
-		m.builderPool.Put(innerBuilder)
 		return err
 	}
 	va.AddRaw(data)
-	m.builderPool.Put(innerBuilder)
 	return nil
 }
 
@@ -313,22 +311,18 @@ func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
 	case reflect.String:
 		va.AddString(rv.String())
 	case reflect.Struct:
-		innerBuilder := m.builderPool.Get().(*Builder)
-		innerBuilder.Reset()
+		innerBuilder := va.InnerBuilder()
 
 		err := m.marshalStruct(innerBuilder, rv)
 		if err != nil {
-			m.builderPool.Put(innerBuilder)
 			return err
 		}
 
 		data, err := innerBuilder.Build()
 		if err != nil {
-			m.builderPool.Put(innerBuilder)
 			return err
 		}
 		va.AddRaw(data)
-		m.builderPool.Put(innerBuilder)
 	case reflect.Map:
 		if rv.IsNil() {
 			va.AddNull()
@@ -348,8 +342,7 @@ func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
 			return err
 		}
 
-		innerArrayBuilder := m.arrayBuilderPool.Get().(*ArrayBuilder)
-		innerArrayBuilder.Reset(rafElemType, count)
+		innerArrayBuilder := va.InnerArrayBuilder(rafElemType, count)
 
 		elemKind := elemType.Kind()
 		for elemKind == reflect.Pointer {
@@ -429,7 +422,6 @@ func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
 				}
 
 				if err := m.marshalValue(innerArrayBuilder, elemValue); err != nil {
-					m.arrayBuilderPool.Put(innerArrayBuilder)
 					return err
 				}
 			}
@@ -437,12 +429,10 @@ func (m *Marshaler) marshalValue(va valueAdder, rv reflect.Value) error {
 
 		innerArrayBuilderData, err := innerArrayBuilder.Build()
 		if err != nil {
-			m.arrayBuilderPool.Put(innerArrayBuilder)
 			return err
 		}
 
 		va.AddRaw(innerArrayBuilderData)
-		m.arrayBuilderPool.Put(innerArrayBuilder)
 
 	default:
 		return fmt.Errorf("raf: unsupported value type %s", rv.Type().String())
