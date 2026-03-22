@@ -32,6 +32,11 @@ type reflectField struct {
 type structFields struct {
 	rafFields     []KeyType
 	reflectFields []reflectField
+
+	// Cache the encoded keys
+	keys        []byte
+	keyCount    int
+	keyBytesLen int
 }
 
 func (sf *structFields) Len() int {
@@ -71,6 +76,13 @@ func computeStructFields(rt reflect.Type) (*structFields, error) {
 	// Sort fields by name for deterministic encoding order
 	structFields := &structFields{rafFields: rafFields, reflectFields: reflectFields}
 	sort.Stable(structFields)
+
+	// Compute the encoded keys for this struct type and cache them in structFields.
+	keysBuf, keyCount, keyBytesLen := (&Builder{}).BuildKeysHeader(nil, rafFields...)
+	structFields.keys = keysBuf
+	structFields.keyCount = keyCount
+	structFields.keyBytesLen = keyBytesLen
+
 	return structFields, nil
 }
 
@@ -184,7 +196,7 @@ func (m *Marshaler) marshalStruct(builder *Builder, rv reflect.Value) error {
 	}
 
 	// Write keys
-	builder.AddKeys(structFields.rafFields...)
+	builder.WriteKeysHeader(structFields.keys, structFields.keyCount, structFields.keyBytesLen)
 
 	// Write values
 	for _, rf := range structFields.reflectFields {

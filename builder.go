@@ -109,16 +109,78 @@ func (b *Builder) Reset() {
 }
 
 func (b *Builder) AddKeys(keys ...KeyType) {
-	count := len(keys)
-	b.keyCount = count
+	// Use BuildKeysHeader to write the keys header directly into the builder's buffer
+	var keyCount int
+	b.buf, keyCount, _ = b.BuildKeysHeader(b.buf, keys...)
+	b.valOffsetsStart = len(b.buf) - (keyCount+1)*hValOffsetSize
+	b.keyCount = keyCount
+}
 
-	var keyBytesLen int
+// BuildKeysHeader is a helper function to pre-build the keys header
+// for a map or struct to avoid the overhead of building it again
+// when you have multiple objects with the same keys.
+//
+// The data includes the key count, value types, key offsets, and key bytes.
+// It's very useful for tight loops.
+func (b *Builder) BuildKeysHeader(buf []byte, keys ...KeyType) (returnedBuf []byte, count int, keyBytesLen int) {
+	count = len(keys)
+
 	for i := range count {
 		keyBytesLen += len(keys[i].Name)
 	}
 
 	totalAdded := 2 + count + (count+1)*2 + keyBytesLen + (count+1)*hValOffsetSize
+	start := len(buf)
+
+	// Just ensure we have enough capacity to write without appends
+	if cap(buf)-start < totalAdded {
+		newBuf := make([]byte, start, start*2+totalAdded)
+		copy(newBuf, buf)
+		buf = newBuf
+	}
+	returnedBuf = buf[:start+totalAdded]
+
+	pos := start
+
+	// Add key count
+	binary.LittleEndian.PutUint16(returnedBuf[pos:], uint16(count))
+	pos += 2
+
+	// Add value types
+	for i := range count {
+		returnedBuf[pos] = byte(keys[i].Type)
+		pos++
+	}
+
+	// Add key offsets
+	offset := 0
+	for i := range count {
+		binary.LittleEndian.PutUint16(returnedBuf[pos:], uint16(offset))
+		keySize := len(keys[i].Name)
+
+		offset += keySize
+		pos += 2
+	}
+	binary.LittleEndian.PutUint16(returnedBuf[pos:], uint16(offset)) // For the end of the last key
+	pos += 2
+
+	// Add key bytes
+	for i := range count {
+		n := copy(returnedBuf[pos:], keys[i].Name)
+		pos += n
+	}
+
+	// Value offsets space is already reserved in totalAdded
+	return returnedBuf, count, keyBytesLen
+}
+
+// WriteKeysHeader is a helper function to write the keys header directly
+// into the builder's buffer.
+// This is useful when you have pre-built the keys header using BuildKeysHeader
+// and want to write it directly into the builder's buffer without copying.
+func (b *Builder) WriteKeysHeader(data []byte, keyCount int, keyBytesLen int) {
 	start := len(b.buf)
+	totalAdded := 2 + keyCount + (keyCount+1)*2 + keyBytesLen + (keyCount+1)*hValOffsetSize
 
 	// Just ensure we have enough capacity to write without appends
 	if cap(b.buf)-start < totalAdded {
@@ -127,39 +189,10 @@ func (b *Builder) AddKeys(keys ...KeyType) {
 		b.buf = newBuf
 	}
 	b.buf = b.buf[:start+totalAdded]
+	copy(b.buf[start:], data)
 
-	pos := start
-
-	// Add key count
-	binary.LittleEndian.PutUint16(b.buf[pos:], uint16(count))
-	pos += 2
-
-	// Add value types
-	for i := range count {
-		b.buf[pos] = byte(keys[i].Type)
-		pos++
-	}
-
-	// Add key offsets
-	offset := 0
-	for i := range count {
-		binary.LittleEndian.PutUint16(b.buf[pos:], uint16(offset))
-		keySize := len(keys[i].Name)
-
-		offset += keySize
-		pos += 2
-	}
-	binary.LittleEndian.PutUint16(b.buf[pos:], uint16(offset)) // For the end of the last key
-	pos += 2
-
-	// Add key bytes
-	for i := range count {
-		n := copy(b.buf[pos:], keys[i].Name)
-		pos += n
-	}
-
-	// Value offsets space is already reserved in totalAdded
-	b.valOffsetsStart = pos
+	b.valOffsetsStart = start + 2 + keyCount + (keyCount+1)*2 + keyBytesLen
+	b.keyCount = keyCount
 }
 
 func (b *Builder) AddString(value string) {
