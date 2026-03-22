@@ -560,3 +560,39 @@ func TestMissingFields(t *testing.T) {
 		Float: 0,
 	})
 }
+
+func TestArrayOfMap(t *testing.T) {
+	type A struct {
+		ArrayOfMap []map[string]any `raf:"array_of_map"`
+	}
+
+	testMarshalUnmarshal_WithSelf(t, A{
+		ArrayOfMap: []map[string]any{
+			{"key1": "value1", "key2": int64(42)},
+			{"key3": true, "key4": 3.14},
+		},
+	})
+
+}
+
+func TestArrayOfStructWithMap(t *testing.T) {
+	type B struct {
+		Key1 string         `raf:"key1"`
+		Key2 int            `raf:"key2"`
+		Key3 bool           `raf:"key3"`
+		Key4 float64        `raf:"key4"`
+		V    map[string]any `raf:"v"`
+	}
+
+	type A struct {
+		ArrayOfStruct []B `raf:"array_of_struct"`
+	}
+
+	testMarshalUnmarshal_WithSelf(t, A{
+		ArrayOfStruct: []B{
+			{Key1: "value1", Key2: 42, Key3: true, Key4: 3.14, V: map[string]any{"nestedKey": "nestedValue"}},
+			{Key1: "value2", Key2: 43, Key3: false, Key4: 2.71, V: map[string]any{"nestedKey": "nestedValue"}},
+		},
+	})
+
+}

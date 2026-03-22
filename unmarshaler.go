@@ -230,7 +230,7 @@ func typeCompatible(valType Type, targetKind reflect.Kind) bool {
 	case TypeBool:
 		return targetKind == reflect.Bool
 	case TypeMap:
-		return targetKind == reflect.Struct
+		return targetKind == reflect.Struct || targetKind == reflect.Map
 	case TypeArray:
 		return targetKind == reflect.Slice
 	default:
@@ -311,6 +311,12 @@ func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data Block, base unsafe.Point
 			if err := u.unmarshal(op.nested, val.Block(), fieldPtr); err != nil {
 				return err
 			}
+		case reflect.Map:
+			if len(val.Data) == 0 {
+				break
+			}
+			m := unmarshalBlockToMap(val.Block())
+			reflect.NewAt(op.targetType, fieldPtr).Elem().Set(reflect.ValueOf(m))
 		case reflect.Slice:
 			if len(val.Data) == 0 {
 				break
@@ -362,6 +368,9 @@ func (u *Unmarshaler) unmarshal(ops []unmarshalOP, data Block, base unsafe.Point
 					if err := u.unmarshal(op.nested, NewBlock(arr.At(i)), elemPtr); err != nil {
 						return err
 					}
+				case reflect.Map:
+					m := unmarshalBlockToMap(NewBlock(arr.At(i)))
+					reflect.NewAt(op.targetType.Elem(), elemPtr).Elem().Set(reflect.ValueOf(m))
 				default:
 					return fmt.Errorf("unsupported slice element kind: %s", op.elemKind)
 				}
