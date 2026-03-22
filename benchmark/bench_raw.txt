@@ -1,0 +1,68 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/alialaee/raf/benchmark
+cpu: Apple M4
+BenchmarkAllMarshals_APIResponse/BSON-10    	  418746	      2949 ns/op	    2673 B/op	       2 allocs/op
+BenchmarkAllMarshals_APIResponse/BSON-10    	  388927	      2951 ns/op	    2672 B/op	       2 allocs/op
+BenchmarkAllMarshals_APIResponse/RAF-10     	  798546	      1459 ns/op	    2025 B/op	       2 allocs/op
+BenchmarkAllMarshals_APIResponse/RAF-10     	  786081	      1574 ns/op	    2025 B/op	       2 allocs/op
+BenchmarkAllMarshals_APIResponse/JSON-10    	  770378	      1542 ns/op	    1460 B/op	       2 allocs/op
+BenchmarkAllMarshals_APIResponse/JSON-10    	  768082	      1541 ns/op	    1460 B/op	       2 allocs/op
+BenchmarkAllMarshals_APIResponse/MsgPack-10 	  606823	      2088 ns/op	    3114 B/op	      12 allocs/op
+BenchmarkAllMarshals_APIResponse/MsgPack-10 	  612439	      2004 ns/op	    3114 B/op	      12 allocs/op
+BenchmarkAllMarshals_APIResponse/CBOR-10    	 1000000	      1172 ns/op	    1220 B/op	       2 allocs/op
+BenchmarkAllMarshals_APIResponse/CBOR-10    	 1000000	      1151 ns/op	    1220 B/op	       2 allocs/op
+BenchmarkAllUnmarshals_APIResponse/CBOR-10  	  297674	      3766 ns/op	    1705 B/op	      57 allocs/op
+BenchmarkAllUnmarshals_APIResponse/CBOR-10  	  318273	      3754 ns/op	    1705 B/op	      57 allocs/op
+BenchmarkAllUnmarshals_APIResponse/BSON-10  	  178213	      6689 ns/op	    4755 B/op	     196 allocs/op
+BenchmarkAllUnmarshals_APIResponse/BSON-10  	  176436	      6704 ns/op	    4755 B/op	     196 allocs/op
+BenchmarkAllUnmarshals_APIResponse/RAF-10   	  790293	      1429 ns/op	    1707 B/op	      57 allocs/op
+BenchmarkAllUnmarshals_APIResponse/RAF-10   	  782593	      1425 ns/op	    1707 B/op	      57 allocs/op
+BenchmarkAllUnmarshals_APIResponse/JSON-10  	  135891	      8751 ns/op	    3167 B/op	      69 allocs/op
+BenchmarkAllUnmarshals_APIResponse/JSON-10  	  135438	      8795 ns/op	    3167 B/op	      69 allocs/op
+BenchmarkAllUnmarshals_APIResponse/MsgPack-10         	  353476	      3265 ns/op	    2355 B/op	      56 allocs/op
+BenchmarkAllUnmarshals_APIResponse/MsgPack-10         	  354997	      3232 ns/op	    2354 B/op	      56 allocs/op
+BenchmarkAllMarshals_Player/RAF-10                    	  821342	      1402 ns/op	    2040 B/op	       2 allocs/op
+BenchmarkAllMarshals_Player/RAF-10                    	  816416	      1403 ns/op	    2040 B/op	       2 allocs/op
+BenchmarkAllMarshals_Player/JSON-10                   	  846470	      1395 ns/op	    1369 B/op	       2 allocs/op
+BenchmarkAllMarshals_Player/JSON-10                   	  850164	      1393 ns/op	    1369 B/op	       2 allocs/op
+BenchmarkAllMarshals_Player/MsgPack-10                	  586806	      2004 ns/op	    2347 B/op	       6 allocs/op
+BenchmarkAllMarshals_Player/MsgPack-10                	  577370	      2036 ns/op	    2347 B/op	       6 allocs/op
+BenchmarkAllMarshals_Player/CBOR-10                   	  971850	      1210 ns/op	    1054 B/op	       2 allocs/op
+BenchmarkAllMarshals_Player/CBOR-10                   	  981049	      1209 ns/op	    1054 B/op	       2 allocs/op
+BenchmarkAllMarshals_Player/BSON-10                   	  396812	      2938 ns/op	    1410 B/op	       2 allocs/op
+BenchmarkAllMarshals_Player/BSON-10                   	  399435	      2946 ns/op	    1408 B/op	       2 allocs/op
+BenchmarkAllUnmarshals_Player/RAF-10                  	 1217682	       980.7 ns/op	     927 B/op	      25 allocs/op
+BenchmarkAllUnmarshals_Player/RAF-10                  	 1213814	       985.7 ns/op	     927 B/op	      25 allocs/op
+BenchmarkAllUnmarshals_Player/JSON-10                 	  144420	      8294 ns/op	    1763 B/op	      36 allocs/op
+BenchmarkAllUnmarshals_Player/JSON-10                 	  143959	      8303 ns/op	    1763 B/op	      36 allocs/op
+BenchmarkAllUnmarshals_Player/MsgPack-10              	  366945	      3182 ns/op	    1314 B/op	      28 allocs/op
+BenchmarkAllUnmarshals_Player/MsgPack-10              	  364093	      3181 ns/op	    1314 B/op	      28 allocs/op
+BenchmarkAllUnmarshals_Player/CBOR-10                 	  330262	      3550 ns/op	     928 B/op	      25 allocs/op
+BenchmarkAllUnmarshals_Player/CBOR-10                 	  330362	      3555 ns/op	     928 B/op	      25 allocs/op
+BenchmarkAllUnmarshals_Player/BSON-10                 	  187550	      6665 ns/op	    2892 B/op	     157 allocs/op
+BenchmarkAllUnmarshals_Player/BSON-10                 	  184274	      6494 ns/op	    2892 B/op	     157 allocs/op
+BenchmarkRAF_Lookup_Players-10                        	64682326	        18.31 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRAF_Lookup_Players-10                        	68230064	        17.26 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/MsgPack-10        	 3153507	       377.8 ns/op	     640 B/op	       5 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/MsgPack-10        	 3171145	       378.5 ns/op	     640 B/op	       5 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/CBOR-10           	 4994658	       237.3 ns/op	     360 B/op	       2 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/CBOR-10           	 5006138	       246.0 ns/op	     360 B/op	       2 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/BSON-10           	 2484679	       487.9 ns/op	     427 B/op	       2 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/BSON-10           	 2476920	       485.1 ns/op	     427 B/op	       2 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/RAF-10            	 4773326	       262.2 ns/op	     464 B/op	       2 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/RAF-10            	 4877512	       247.4 ns/op	     464 B/op	       2 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/JSON-10           	 3455468	       350.4 ns/op	     417 B/op	       2 allocs/op
+BenchmarkAllMarshals_TelemetryEvent/JSON-10           	 3390902	       367.7 ns/op	     417 B/op	       2 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/RAF-10          	 5843532	       212.9 ns/op	     271 B/op	       9 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/RAF-10          	 5745328	       205.4 ns/op	     271 B/op	       9 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/JSON-10         	  695683	      1695 ns/op	     530 B/op	      15 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/JSON-10         	  701546	      1694 ns/op	     530 B/op	      15 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/MsgPack-10      	 2202019	       547.1 ns/op	     320 B/op	      10 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/MsgPack-10      	 2163062	       570.6 ns/op	     320 B/op	      10 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/CBOR-10         	 1896928	       632.5 ns/op	     271 B/op	       9 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/CBOR-10         	 1904822	       634.3 ns/op	     271 B/op	       9 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/BSON-10         	 1284042	       950.0 ns/op	     518 B/op	      30 allocs/op
+BenchmarkAllUnmarshals_TelemetryEvent/BSON-10         	 1231050	       948.5 ns/op	     518 B/op	      30 allocs/op
+PASS
+ok  	github.com/alialaee/raf/benchmark	88.190s
