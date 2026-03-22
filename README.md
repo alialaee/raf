@@ -38,24 +38,30 @@ See the [benchmark](benchmark) directory for performance comparisons against a f
 
 Here's a summary of the results on my machine (Apple MacBook Air M4):
 
+### Player (Large Struct) - Marshal
+
+| Codec | ns/op | B/op | allocs/op |
+|-------|------:|-----:|----------:|
+| RAF | 1,402 (1.2x) | 2,040 | 2 |
+| JSON | 1,394 (1.2x) | 1,369 | 2 |
+| MsgPack | 2,020 (1.7x) | 2,347 | 6 |
+| CBOR | 1,210 **fastest** | 1,054 | 2 |
+| BSON | 2,942 (2.4x) | 1,409 | 2 |
+
+### Player (Large Struct) - Unmarshal
+
+| Codec | ns/op | B/op | allocs/op |
+|-------|------:|-----:|----------:|
+| RAF | 983 **fastest** | 927 | 25 |
+| JSON | 8,298 (8.4x) | 1,763 | 36 |
+| MsgPack | 3,182 (3.2x) | 1,314 | 28 |
+| CBOR | 3,552 (3.6x) | 928 | 25 |
+| BSON | 6,580 (6.7x) | 2,892 | 157 |
+
+### Field Lookup (Large Struct) - Get
+
 ```
-goos: darwin
-goarch: arm64
-pkg: github.com/alialaee/raf/benchmark
-cpu: Apple M4
-
-BenchmarkRAF_Marshal-10         1277 ns/op	    2016 B/op	       2 allocs/op
-BenchmarkMsgPack_Marshal-10     1860 ns/op	    2327 B/op	       6 allocs/op
-BenchmarkJSON_Marshal-10        1297 ns/op	    1355 B/op	       2 allocs/op
-BenchmarkCBOR_Marshal-10        1126 ns/op	    1046 B/op	       2 allocs/op
-BenchmarkBSON_Marshal-10        2763 ns/op	    1391 B/op	       2 allocs/op
-
-BenchmarkRAF_Unmarshal-10       947.8 ns/op	     913 B/op	      25 allocs/op
-BenchmarkRAF_Lookup_Name-10     17.63 ns/op	       0 B/op	       0 allocs/op
-BenchmarkJSON_Unmarshal-10      7816 ns/op	    1744 B/op	      35 allocs/op
-BenchmarkMsgPack_Unmarshal-10   3223 ns/op	    1290 B/op	      28 allocs/op
-BenchmarkCBOR_Unmarshal-10      3419 ns/op	     914 B/op	      25 allocs/op
-BenchmarkBSON_Unmarshal-10      6073 ns/op	    2839 B/op	     154 allocs/op
+BenchmarkRAF_Lookup_Players-10   17.26 ns/op   0 B/op   0 allocs/op
 ```
 
 ## Example Usage
