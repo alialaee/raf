@@ -38,27 +38,27 @@ See the [benchmark](benchmark) directory for performance comparisons against a f
 
 Here's a summary of the results on my machine (Apple MacBook Air M4):
 
-### Player (Large Struct) - Marshal
+### Player — Marshal
 
 | Codec | ns/op | B/op | allocs/op |
 |-------|------:|-----:|----------:|
-| RAF | 1,402 (1.2x) | 2,040 | 2 |
-| JSON | 1,394 (1.2x) | 1,369 | 2 |
-| MsgPack | 2,020 (1.7x) | 2,347 | 6 |
-| CBOR | 1,210 **fastest** | 1,054 | 2 |
-| BSON | 2,942 (2.4x) | 1,409 | 2 |
+| RAF | 1,028 **fastest** | 2,036 | 2 |
+| JSON | 1,415 (1.4x) | 1,369 | 2 |
+| MsgPack | 2,006 (2.0x) | 2,347 | 6 |
+| CBOR | 1,199 (1.2x) | 1,054 | 2 |
+| BSON | 2,912 (2.8x) | 1,408 | 2 |
 
-### Player (Large Struct) - Unmarshal
+### Player — Unmarshal
 
 | Codec | ns/op | B/op | allocs/op |
 |-------|------:|-----:|----------:|
-| RAF | 983 **fastest** | 927 | 25 |
-| JSON | 8,298 (8.4x) | 1,763 | 36 |
-| MsgPack | 3,182 (3.2x) | 1,314 | 28 |
-| CBOR | 3,552 (3.6x) | 928 | 25 |
-| BSON | 6,580 (6.7x) | 2,892 | 157 |
+| RAF | 993 **fastest** | 927 | 25 |
+| JSON | 8,288 (8.3x) | 1,763 | 36 |
+| MsgPack | 3,238 (3.3x) | 1,314 | 28 |
+| CBOR | 3,588 (3.6x) | 928 | 25 |
+| BSON | 6,266 (6.3x) | 2,892 | 157 |
 
-### Field Lookup (Large Struct) - Get
+### Player Field Lookup (using `Block`)
 
 ```
 BenchmarkRAF_Lookup_Players-10   17.26 ns/op   0 B/op   0 allocs/op
