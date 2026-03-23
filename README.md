@@ -38,7 +38,7 @@ See the [benchmark](benchmark) directory for performance comparisons against a f
 
 Here's a summary of the results on my machine (Apple MacBook Air M4):
 
-### Player — Marshal
+### Player (A large struct) - Marshal
 
 | Codec | ns/op | B/op | allocs/op |
 |-------|------:|-----:|----------:|
@@ -48,7 +48,7 @@ Here's a summary of the results on my machine (Apple MacBook Air M4):
 | CBOR | 1,199 (1.2x) | 1,054 | 2 |
 | BSON | 2,912 (2.8x) | 1,408 | 2 |
 
-### Player — Unmarshal
+### Player (A large struct) - Unmarshal
 
 | Codec | ns/op | B/op | allocs/op |
 |-------|------:|-----:|----------:|
