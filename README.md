@@ -2,13 +2,12 @@
 
 [![Test](https://github.com/alialaee/raf/actions/workflows/test.yml/badge.svg)](https://github.com/alialaee/raf/actions/workflows/test.yml)
 
-`raf` provides a simple, read-optimized binary format in Go.
+`RAF` is a simple, read-optimized binary format in Go. It almost can represents what JSON can.
 
-Designed for fast read access across a few kilobytes of data, keys are sorted lexicographically as raw bytes for quick retrieval. RAF can represent what JSON can.
+RAF provides two APIs, `Marshal`/`Unmarshal` for general use cases and `Builder`/`Block` for high performance use cases. The current `Marshal`/`Unmarshal` implementation achieves very high performance, even outperforming Protobuf in `Unmarshal` without using code generation.
 
 > [!NOTE]  
 > Originally part of a proprietary database engine, this was extracted into a standalone library to improve its ergonomics and add new features. Also take a look at its sister project for writing and reading sequential data (logs), [logfile](https://github.com/alialaee/logfile).
-
 
 ## Features
 
@@ -16,7 +15,6 @@ Designed for fast read access across a few kilobytes of data, keys are sorted le
 - **Read-optimized:** Built for extremely fast sequential and random reads.
 - **Random lookup:** Retrieve specific fields without full deserialization.
 - **Simple:** The format is straightforward to parse and implement.
-- **Compact:** Low-overhead binary format.
 - **Schema-less**
 - **Canonical serialization:** Only one representation of a single data.
 - **Zero-allocation** by using `Builder` and `Block` and minimal allocations using `Marshal` and `Unmarshal`.
