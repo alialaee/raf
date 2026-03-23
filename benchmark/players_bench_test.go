@@ -37,6 +37,110 @@ func BenchmarkRAF_Lookup_Players(b *testing.B) {
 	}
 }
 
+func BenchmarkRAF_Marshal_Manual_Player(b *testing.B) {
+	b.ResetTimer()
+
+	builder := raf.NewBuilder(nil)
+	for i := range b.N {
+		builder.Reset()
+		player := players[i%len(players)]
+
+		builder.AddKeys(
+			raf.KeyType{Name: "Armors", Type: raf.TypeMap},
+			raf.KeyType{Name: "CanFly", Type: raf.TypeBool},
+			raf.KeyType{Name: "CanSwim", Type: raf.TypeBool},
+			raf.KeyType{Name: "CanTeleport", Type: raf.TypeBool},
+			raf.KeyType{Name: "Friends", Type: raf.TypeArray},
+			raf.KeyType{Name: "Health", Type: raf.TypeInt64},
+			raf.KeyType{Name: "ID", Type: raf.TypeInt64},
+			raf.KeyType{Name: "Items", Type: raf.TypeArray},
+			raf.KeyType{Name: "Level", Type: raf.TypeInt64},
+			raf.KeyType{Name: "Mana", Type: raf.TypeInt64},
+			raf.KeyType{Name: "Name", Type: raf.TypeString},
+			raf.KeyType{Name: "Weapon", Type: raf.TypeMap},
+		)
+
+		// Armors
+		builder.AddBuilderFn(func(b *raf.Builder) error {
+			b.AddKeys(
+				raf.KeyType{Name: "Arms", Type: raf.TypeMap},
+				raf.KeyType{Name: "Body", Type: raf.TypeMap},
+				raf.KeyType{Name: "Feet", Type: raf.TypeMap},
+				raf.KeyType{Name: "Head", Type: raf.TypeMap},
+				raf.KeyType{Name: "Legs", Type: raf.TypeMap},
+				raf.KeyType{Name: "Ring1", Type: raf.TypeMap},
+				raf.KeyType{Name: "Ring2", Type: raf.TypeMap},
+			)
+
+			b.AddBuilderFn(func(ib *raf.Builder) error { return buildItem(ib, &player.Armors.Arms) })
+			b.AddBuilderFn(func(ib *raf.Builder) error { return buildItem(ib, &player.Armors.Body) })
+			b.AddBuilderFn(func(ib *raf.Builder) error { return buildItem(ib, &player.Armors.Feet) })
+			b.AddBuilderFn(func(ib *raf.Builder) error { return buildItem(ib, &player.Armors.Head) })
+			b.AddBuilderFn(func(ib *raf.Builder) error { return buildItem(ib, &player.Armors.Legs) })
+			b.AddBuilderFn(func(ib *raf.Builder) error { return buildItem(ib, &player.Armors.Ring1) })
+			b.AddBuilderFn(func(ib *raf.Builder) error { return buildItem(ib, &player.Armors.Ring2) })
+
+			return nil
+		})
+
+		builder.AddBool(player.CanFly)
+		builder.AddBool(player.CanSwim)
+		builder.AddBool(player.CanTeleport)
+		builder.AddStringArray(player.Friends...)
+		builder.AddInt64(int64(player.Health))
+		builder.AddInt64(int64(player.ID))
+
+		// Items
+		builder.AddArrayFn(raf.TypeMap, len(player.Items), func(b *raf.ArrayBuilder) error {
+			innerBuilder := b.InnerBuilder()
+
+			for i := range player.Items {
+				innerBuilder.Reset()
+
+				if err := buildItem(innerBuilder, &player.Items[i]); err != nil {
+					return err
+				}
+
+				data, err := innerBuilder.Build()
+				if err != nil {
+					return err
+				}
+
+				b.AddRaw(data)
+			}
+			return nil
+		})
+
+		builder.AddInt64(int64(player.Level))
+		builder.AddInt64(int64(player.Mana))
+		builder.AddString(player.Name)
+
+		// Weapon
+		builder.AddBuilderFn(func(b *raf.Builder) error {
+			return buildItem(b, &player.Weapon)
+		})
+
+		_, err := builder.Build()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+}
+
+func buildItem(b *raf.Builder, item *PlayerItem) error {
+	b.AddKeys(
+		raf.KeyType{Name: "ID", Type: raf.TypeInt64},
+		raf.KeyType{Name: "Name", Type: raf.TypeString},
+		raf.KeyType{Name: "Type", Type: raf.TypeInt64},
+	)
+
+	b.AddInt64(int64(item.ID))
+	b.AddString(item.Name)
+	b.AddInt64(int64(item.Type))
+	return nil
+}
+
 type ItemType int
 
 const (

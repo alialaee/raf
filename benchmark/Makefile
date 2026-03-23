@@ -11,5 +11,8 @@ summary: bench
 	@echo ""
 	@echo "Summary in README.md"
 
+protobuf:
+	protoc --go_out=. --go_opt=paths=source_relative proto/player.proto
+
 clean:
 	rm -rf results

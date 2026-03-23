@@ -7,7 +7,7 @@ from collections import defaultdict
 
 
 BENCH_RE = re.compile(
-    r"^BenchmarkAll(Marshals|Unmarshals)_(\w+)/"
+    r"^Benchmark(All|Protobuf)(Marshals|Unmarshals)_(\w+)/"
     r"(\w+)-\d+\s+"
     r"(\d+)\s+"
     r"([\d.]+)\s+ns/op"
@@ -23,14 +23,14 @@ def parse_bench_output(path):
             m = BENCH_RE.match(line.strip())
             if not m:
                 continue
-            op = m.group(1)       # Marshals / Unmarshals
-            dtype = m.group(2)    # APIResponse, Player, ...
-            codec = m.group(3)    # RAF, JSON, ...
+            op = m.group(2)       # Marshals / Unmarshals
+            dtype = m.group(3)    # APIResponse, Player, ...
+            codec = m.group(4)    # RAF, JSON, ...
             key = (op, dtype, codec)
             raw[key].append({
-                "ns_op":  float(m.group(5)),
-                "b_op":   int(m.group(6)) if m.group(6) else 0,
-                "allocs": int(m.group(7)) if m.group(7) else 0,
+                "ns_op":  float(m.group(6)),
+                "b_op":   int(m.group(7)) if m.group(6) else 0,
+                "allocs": int(m.group(8)) if m.group(7) else 0,
             })
 
     results = []
@@ -65,26 +65,26 @@ def generate_summary(results, out_path):
     ]
 
     for (dtype, op), items in sorted(groups.items()):
-        anchor = f"{dtype.lower()}-{op.lower()}"
-        lines.append(f"## {dtype} — {op}\n")
+        lines.append(f"### {dtype} - {op}\n")
 
         codecs = _sorted_codecs(list({r["codec"] for r in items}))
         lines.append("| Codec | ns/op | B/op | allocs/op |")
         lines.append("|-------|------:|-----:|----------:|")
 
         fastest_ns = min(r["ns_op"] for r in items)
+        raf_ns = r["ns_op"] if (r := next((r for r in items if r["codec"] == "RAF"), None)) else None
         for codec in codecs:
             r = next((r for r in items if r["codec"] == codec), None)
             if not r:
                 continue
-            speedup = ""
-            if r["ns_op"] == fastest_ns:
-                speedup = " **fastest**"
-            elif fastest_ns > 0:
-                ratio = r["ns_op"] / fastest_ns
-                speedup = f" ({ratio:.1f}x)"
+            
+            ratio = r["ns_op"] / raf_ns
+            speedup = f" ({ratio:.1f}x)"
+
+            codec_with_style = f"**{codec}**" if r["ns_op"] == fastest_ns else codec
+
             lines.append(
-                f"| {codec} | {r['ns_op']:,.0f}{speedup} | {int(r['b_op']):,} | {int(r['allocs']):,} |"
+                f"| {codec_with_style} | {r['ns_op']:,.0f}{speedup} | {int(r['b_op']):,} | {int(r['allocs']):,} |"
             )
         lines.append("")
 

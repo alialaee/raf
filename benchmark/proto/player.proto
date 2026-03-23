@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package player;
+
+option go_package = "proto.playerpb";
+
+message Player {
+  int64 id = 1;
+  string name = 2;
+  repeated PlayerItem items = 3;
+  PlayerItem weapon = 4;
+  PlayerArmors armors = 5;
+  int64 health = 6;
+  int64 mana = 7;
+  int64 level = 8;
+  bool can_fly = 9;
+  bool can_swim = 10;
+  bool can_teleport = 11;
+  repeated string friends = 12;
+}
+
+message PlayerItem {
+  int64 id = 1;
+  string name = 2;
+  ItemType type = 3;
+}
+
+message PlayerArmors {
+  PlayerItem head = 1;
+  PlayerItem body = 2;
+  PlayerItem legs = 3;
+  PlayerItem arms = 4;
+  PlayerItem feet = 5;
+  PlayerItem ring1 = 6;
+  PlayerItem ring2 = 7;
+}
+
+enum ItemType {
+  ITEM_TYPE_WEAPON = 0;
+  ITEM_TYPE_ARMOR = 1;
+  ITEM_TYPE_POTION = 2;
+  ITEM_TYPE_FOOD = 3;
+  ITEM_TYPE_MISC = 4;
+}

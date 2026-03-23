@@ -13,6 +13,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 replace github.com/alialaee/raf => ../
