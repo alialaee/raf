@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unsafe"
 )
 
 type valueAdder interface {
@@ -25,6 +26,7 @@ type valueAdder interface {
 
 type reflectField struct {
 	index      int
+	offset     uintptr
 	isNullable bool
 	kind       reflect.Kind
 }
@@ -70,7 +72,13 @@ func computeStructFields(rt reflect.Type) (*structFields, error) {
 		}
 
 		rafFields = append(rafFields, KeyType{Name: name, Type: rafType})
-		reflectFields = append(reflectFields, reflectField{index: i, isNullable: isNullableType(f.Type), kind: f.Type.Kind()})
+		reflectFields = append(reflectFields,
+			reflectField{
+				index:      i,
+				offset:     f.Offset,
+				isNullable: isNullableType(f.Type),
+				kind:       f.Type.Kind()},
+		)
 	}
 
 	// Sort fields by name for deterministic encoding order
@@ -195,32 +203,85 @@ func (m *Marshaler) marshalStruct(builder *Builder, rv reflect.Value) error {
 		return err
 	}
 
-	// Write keys
+	// Write keys (use the pre-encoded keys from structFields)
 	builder.WriteKeysHeader(structFields.keys, structFields.keyCount, structFields.keyBytesLen)
 
+	// *** Used for fast path below:
+	//
+	// rvInternal represents the internal structure of a value in reflect.
+	// It's very hacky but it gives us fast direct access to the fields.
+	type rvInternal struct {
+		_    uintptr
+		ptr  unsafe.Pointer
+		flag uintptr
+	}
+
+	rvi := (*rvInternal)(unsafe.Pointer(&rv))
+	var basePtr unsafe.Pointer
+	// Check if the value is stored indirectly or it's a small value stored directly in the pointer.
+	if rvi.flag&(1<<7) != 0 {
+		basePtr = rvi.ptr
+	} else {
+		basePtr = unsafe.Pointer(&rvi.ptr)
+	}
+	// ****
+
 	// Write values
-	for _, rf := range structFields.reflectFields {
+	for i := range structFields.reflectFields {
+		rf := &structFields.reflectFields[i]
+		fieldPtr := unsafe.Add(basePtr, rf.offset)
+
+		// *** Fast path if it's not nullable and not complex
+		if !rf.isNullable {
+			switch rf.kind {
+			case reflect.String:
+				builder.AddString(*(*string)(fieldPtr))
+				continue
+			case reflect.Bool:
+				builder.AddBool(*(*bool)(fieldPtr))
+				continue
+			case reflect.Int:
+				builder.AddInt64(int64(*(*int)(fieldPtr)))
+				continue
+			case reflect.Int8:
+				builder.AddInt64(int64(*(*int8)(fieldPtr)))
+				continue
+			case reflect.Int16:
+				builder.AddInt64(int64(*(*int16)(fieldPtr)))
+				continue
+			case reflect.Int32:
+				builder.AddInt64(int64(*(*int32)(fieldPtr)))
+				continue
+			case reflect.Int64:
+				builder.AddInt64(*(*int64)(fieldPtr))
+				continue
+			case reflect.Uint:
+				builder.AddInt64(int64(*(*uint)(fieldPtr)))
+				continue
+			case reflect.Uint8:
+				builder.AddInt64(int64(*(*uint8)(fieldPtr)))
+				continue
+			case reflect.Uint16:
+				builder.AddInt64(int64(*(*uint16)(fieldPtr)))
+				continue
+			case reflect.Uint32:
+				builder.AddInt64(int64(*(*uint32)(fieldPtr)))
+				continue
+			case reflect.Uint64:
+				builder.AddInt64(int64(*(*uint64)(fieldPtr)))
+				continue
+			case reflect.Float32:
+				builder.AddFloat64(float64(*(*float32)(fieldPtr)))
+				continue
+			case reflect.Float64:
+				builder.AddFloat64(*(*float64)(fieldPtr))
+				continue
+			}
+		}
+
 		fieldValue := rv.Field(rf.index)
 		if rf.isNullable && fieldValue.IsNil() {
 			builder.AddNull()
-			continue
-		}
-
-		switch rf.kind {
-		case reflect.String:
-			builder.AddString(fieldValue.String())
-			continue
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			builder.AddInt64(fieldValue.Int())
-			continue
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			builder.AddInt64(int64(fieldValue.Uint()))
-			continue
-		case reflect.Float32, reflect.Float64:
-			builder.AddFloat64(fieldValue.Float())
-			continue
-		case reflect.Bool:
-			builder.AddBool(fieldValue.Bool())
 			continue
 		}
 
