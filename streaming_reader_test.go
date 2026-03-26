@@ -5,14 +5,39 @@ import (
 	"testing"
 )
 
-func TestStreamBlock_Header(t *testing.T) {
-	type testUser struct {
-		ID      int
-		Name    string
-		Friends []string
-		Active  bool
+type testUser struct {
+	ID      int
+	Name    string
+	Friends []string
+	Active  bool
+}
+
+func BenchmarkStreamBlock_Header(b *testing.B) {
+	user := testUser{
+		ID:      123,
+		Name:    "Ali",
+		Friends: []string{"Melina", "Pampam"},
+		Active:  true,
+	}
+	data, err := Marshal(user)
+	if err != nil {
+		b.Fatalf("Marshal error: %v", err)
 	}
 
+	sb := NewStreamBlock(bytes.NewReader(data))
+
+	reader := bytes.NewReader(data)
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := sb.ReadHeader(); err != nil {
+			b.Fatalf("ReadHeader error: %v", err)
+		}
+		reader.Reset(data)
+		sb.Reset(reader) // Reset for next iteration
+	}
+}
+
+func TestStreamBlock_Header(t *testing.T) {
 	user := testUser{
 		ID:      123,
 		Name:    "Ali",

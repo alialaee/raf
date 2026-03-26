@@ -20,6 +20,8 @@ type StreamBlock struct {
 	valueTypes []byte
 	keys       [][]byte
 	valSizes   []int //  byte size of each value
+
+	headerBuf []byte
 }
 
 // NewStreamBlock creates a StreamBlock that reads from r.
@@ -32,8 +34,10 @@ func (sb *StreamBlock) Reset(r io.Reader) {
 	sb.r = r
 	sb.pairsCount = 0
 	sb.valueTypes = nil
-	sb.keys = nil
-	sb.valSizes = nil
+	// TODO ensure we don't leak memory
+	sb.keys = sb.keys[:0]
+	sb.valSizes = sb.valSizes[:0]
+	sb.headerBuf = sb.headerBuf[:0]
 }
 
 // ReadHeader reads the block header and returns the sorted keys.
@@ -55,39 +59,48 @@ func (sb *StreamBlock) ReadHeader() ([][]byte, error) {
 
 	// Read value types (N bytes) + key offsets ((N+1)*2 bytes)
 	metaSize := n + (n+1)*2
-	meta := make([]byte, metaSize)
-	if _, err := io.ReadFull(sb.r, meta); err != nil {
+	if cap(sb.headerBuf) < metaSize {
+		sb.headerBuf = make([]byte, metaSize)
+	}
+	sb.headerBuf = sb.headerBuf[:metaSize]
+	if _, err := io.ReadFull(sb.r, sb.headerBuf); err != nil {
 		return nil, err
 	}
 
-	sb.valueTypes = meta[:n]
-	keyOffsetsRaw := meta[n:]
+	sb.valueTypes = sb.headerBuf[:n]
+	keyOffsetsRaw := sb.headerBuf[n:]
 	totalKeyBytes := int(binary.LittleEndian.Uint16(keyOffsetsRaw[n*2 : n*2+2]))
 
 	// Read key bytes + value offsets ((N+1)*hValOffsetSize bytes)
 	remainSize := totalKeyBytes + (n+1)*hValOffsetSize
-	remain := make([]byte, remainSize)
-	if _, err := io.ReadFull(sb.r, remain); err != nil {
+	reqSize := metaSize + remainSize
+	if cap(sb.headerBuf) < reqSize {
+		newBuf := make([]byte, reqSize)
+		copy(newBuf, sb.headerBuf[:metaSize])
+		sb.headerBuf = newBuf
+		sb.valueTypes = sb.headerBuf[:n]
+		keyOffsetsRaw = sb.headerBuf[n:metaSize]
+	}
+	sb.headerBuf = sb.headerBuf[:reqSize]
+	if _, err := io.ReadFull(sb.r, sb.headerBuf[metaSize:]); err != nil {
 		return nil, err
 	}
 
-	keyBytes := remain[:totalKeyBytes]
-	valOffsetsRaw := remain[totalKeyBytes:]
+	keyBytes := sb.headerBuf[metaSize : metaSize+totalKeyBytes]
+	valOffsetsRaw := sb.headerBuf[metaSize+totalKeyBytes:]
 
 	// Parse keys
-	sb.keys = make([][]byte, n)
 	for i := range n {
 		startOff := int(binary.LittleEndian.Uint16(keyOffsetsRaw[i*2:]))
 		endOff := int(binary.LittleEndian.Uint16(keyOffsetsRaw[(i+1)*2:]))
-		sb.keys[i] = keyBytes[startOff:endOff]
+		sb.keys = append(sb.keys, keyBytes[startOff:endOff])
 	}
 
-	// Compute value sizes from offset pairs
-	sb.valSizes = make([]int, n)
+	// Value sizes from offset pairs
 	for i := range n {
 		startOff := int(binary.LittleEndian.Uint32(valOffsetsRaw[i*hValOffsetSize:]))
 		endOff := int(binary.LittleEndian.Uint32(valOffsetsRaw[(i+1)*hValOffsetSize:]))
-		sb.valSizes[i] = endOff - startOff
+		sb.valSizes = append(sb.valSizes, endOff-startOff)
 	}
 
 	return sb.keys, nil
