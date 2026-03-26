@@ -34,7 +34,6 @@ func (sb *StreamBlock) Reset(r io.Reader) {
 	sb.r = r
 	sb.pairsCount = 0
 	sb.valueTypes = nil
-	// TODO ensure we don't leak memory
 	sb.keys = sb.keys[:0]
 	sb.valSizes = sb.valSizes[:0]
 	sb.headerBuf = sb.headerBuf[:0]
@@ -57,37 +56,26 @@ func (sb *StreamBlock) ReadHeader() ([][]byte, error) {
 	n := int(binary.LittleEndian.Uint16(hdr[6:8]))
 	sb.pairsCount = n
 
-	// Read value types (N bytes) + key offsets ((N+1)*2 bytes)
+	// Read value types (N bytes) + key offsets ((N+1)*2)
 	metaSize := n + (n+1)*2
-	if cap(sb.headerBuf) < metaSize {
-		sb.headerBuf = make([]byte, metaSize)
+	sb.headerBuf = growBuf(sb.headerBuf, metaSize)
+	if _, err := io.ReadFull(sb.r, sb.headerBuf[:metaSize]); err != nil {
+		return nil, err
 	}
-	sb.headerBuf = sb.headerBuf[:metaSize]
-	if _, err := io.ReadFull(sb.r, sb.headerBuf); err != nil {
+	// Last 2 bytes of keyOffsets is the total key section size
+	totalKeyBytes := int(binary.LittleEndian.Uint16(sb.headerBuf[metaSize-2:]))
+
+	// Read the remainder
+	reqSize := metaSize + totalKeyBytes + (n+1)*hValOffsetSize
+	sb.headerBuf = growBuf(sb.headerBuf, reqSize)
+	if _, err := io.ReadFull(sb.r, sb.headerBuf[metaSize:reqSize]); err != nil {
 		return nil, err
 	}
 
 	sb.valueTypes = sb.headerBuf[:n]
-	keyOffsetsRaw := sb.headerBuf[n:]
-	totalKeyBytes := int(binary.LittleEndian.Uint16(keyOffsetsRaw[n*2 : n*2+2]))
-
-	// Read key bytes + value offsets ((N+1)*hValOffsetSize bytes)
-	remainSize := totalKeyBytes + (n+1)*hValOffsetSize
-	reqSize := metaSize + remainSize
-	if cap(sb.headerBuf) < reqSize {
-		newBuf := make([]byte, reqSize)
-		copy(newBuf, sb.headerBuf[:metaSize])
-		sb.headerBuf = newBuf
-		sb.valueTypes = sb.headerBuf[:n]
-		keyOffsetsRaw = sb.headerBuf[n:metaSize]
-	}
-	sb.headerBuf = sb.headerBuf[:reqSize]
-	if _, err := io.ReadFull(sb.r, sb.headerBuf[metaSize:]); err != nil {
-		return nil, err
-	}
-
+	keyOffsetsRaw := sb.headerBuf[n:metaSize]
 	keyBytes := sb.headerBuf[metaSize : metaSize+totalKeyBytes]
-	valOffsetsRaw := sb.headerBuf[metaSize+totalKeyBytes:]
+	valOffsetsRaw := sb.headerBuf[metaSize+totalKeyBytes : reqSize]
 
 	// Parse keys
 	for i := range n {
@@ -126,7 +114,11 @@ func (sb *StreamBlock) Skip() error {
 	return nil
 }
 
-type StreamArray struct {
-	r        io.Reader
-	elemType Type
+func growBuf(buf []byte, n int) []byte {
+	if cap(buf) >= n {
+		return buf[:n]
+	}
+	newBuf := make([]byte, n)
+	copy(newBuf, buf)
+	return newBuf
 }
