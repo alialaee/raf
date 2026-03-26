@@ -1,0 +1,119 @@
+package raf
+
+import (
+	"encoding/binary"
+	"errors"
+	"io"
+)
+
+var ErrKeyAlreadyPassed = errors.New("raf: key position already passed in stream")
+
+// StreamBlock reads a RAF block sequentially from an io.Reader.
+// After calling ReadHeader, values are read in order using Next,
+// or skipped using Skip and SkipTo.
+//
+// The Value returned by Next reuses an internal buffer and is only
+// valid until the next call to Next.
+type StreamBlock struct {
+	r          io.Reader
+	pairsCount int
+	valueTypes []byte
+	keys       [][]byte
+	valSizes   []int //  byte size of each value
+}
+
+// NewStreamBlock creates a StreamBlock that reads from r.
+func NewStreamBlock(r io.Reader) *StreamBlock {
+	return &StreamBlock{r: r}
+}
+
+// Reset resets the StreamBlock to read from a new reader.
+func (sb *StreamBlock) Reset(r io.Reader) {
+	sb.r = r
+	sb.pairsCount = 0
+	sb.valueTypes = nil
+	sb.keys = nil
+	sb.valSizes = nil
+}
+
+// ReadHeader reads the block header and returns the sorted keys.
+// Must be called before Next, Skip, SkipTo, or Find.
+// Subsequent calls return cached keys without re-reading.
+func (sb *StreamBlock) ReadHeader() ([][]byte, error) {
+	if sb.keys != nil {
+		return sb.keys, nil
+	}
+
+	// Read version(2) + size(4) + pairCount(2) = 8 bytes
+	var hdr [8]byte
+	if _, err := io.ReadFull(sb.r, hdr[:]); err != nil {
+		return nil, err
+	}
+
+	n := int(binary.LittleEndian.Uint16(hdr[6:8]))
+	sb.pairsCount = n
+
+	// Read value types (N bytes) + key offsets ((N+1)*2 bytes)
+	metaSize := n + (n+1)*2
+	meta := make([]byte, metaSize)
+	if _, err := io.ReadFull(sb.r, meta); err != nil {
+		return nil, err
+	}
+
+	sb.valueTypes = meta[:n]
+	keyOffsetsRaw := meta[n:]
+	totalKeyBytes := int(binary.LittleEndian.Uint16(keyOffsetsRaw[n*2 : n*2+2]))
+
+	// Read key bytes + value offsets ((N+1)*hValOffsetSize bytes)
+	remainSize := totalKeyBytes + (n+1)*hValOffsetSize
+	remain := make([]byte, remainSize)
+	if _, err := io.ReadFull(sb.r, remain); err != nil {
+		return nil, err
+	}
+
+	keyBytes := remain[:totalKeyBytes]
+	valOffsetsRaw := remain[totalKeyBytes:]
+
+	// Parse keys
+	sb.keys = make([][]byte, n)
+	for i := range n {
+		startOff := int(binary.LittleEndian.Uint16(keyOffsetsRaw[i*2:]))
+		endOff := int(binary.LittleEndian.Uint16(keyOffsetsRaw[(i+1)*2:]))
+		sb.keys[i] = keyBytes[startOff:endOff]
+	}
+
+	// Compute value sizes from offset pairs
+	sb.valSizes = make([]int, n)
+	for i := range n {
+		startOff := int(binary.LittleEndian.Uint32(valOffsetsRaw[i*hValOffsetSize:]))
+		endOff := int(binary.LittleEndian.Uint32(valOffsetsRaw[(i+1)*hValOffsetSize:]))
+		sb.valSizes[i] = endOff - startOff
+	}
+
+	return sb.keys, nil
+}
+
+func (sb *StreamBlock) Keys() [][]byte {
+	return sb.keys
+}
+
+func (sb *StreamBlock) NumPairs() int {
+	return sb.pairsCount
+}
+
+func (sb *StreamBlock) TypeAt(i int) Type {
+	return Type(sb.valueTypes[i])
+}
+
+func (sb *StreamBlock) Next() (Value, error) {
+	return Value{}, nil
+}
+
+func (sb *StreamBlock) Skip() error {
+	return nil
+}
+
+type StreamArray struct {
+	r        io.Reader
+	elemType Type
+}
