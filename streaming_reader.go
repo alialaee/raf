@@ -21,7 +21,10 @@ type StreamBlock struct {
 	keys       [][]byte
 	valSizes   []int //  byte size of each value
 
+	nextValIndex int
+
 	headerBuf []byte
+	valueBuf  []byte
 }
 
 // NewStreamBlock creates a StreamBlock that reads from r.
@@ -34,9 +37,11 @@ func (sb *StreamBlock) Reset(r io.Reader) {
 	sb.r = r
 	sb.pairsCount = 0
 	sb.valueTypes = nil
+	sb.nextValIndex = 0
 	sb.keys = sb.keys[:0]
 	sb.valSizes = sb.valSizes[:0]
 	sb.headerBuf = sb.headerBuf[:0]
+	sb.valueBuf = sb.valueBuf[:0]
 }
 
 // ReadHeader reads the block header and returns the sorted keys.
@@ -106,12 +111,48 @@ func (sb *StreamBlock) TypeAt(i int) Type {
 	return Type(sb.valueTypes[i])
 }
 
+// Next reads the next value from the stream.
+// The returned Value.Data is only valid until the next call to Next.
+// Returns io.EOF when values are exhausted.
 func (sb *StreamBlock) Next() (Value, error) {
-	return Value{}, nil
+	if sb.nextValIndex >= sb.pairsCount {
+		return Value{}, io.EOF
+	}
+
+	size := sb.valSizes[sb.nextValIndex]
+	valType := Type(sb.valueTypes[sb.nextValIndex])
+	sb.nextValIndex++
+
+	if size == 0 {
+		return Value{Type: valType}, nil
+	}
+
+	sb.valueBuf = growBuf(sb.valueBuf, size)
+	if _, err := io.ReadFull(sb.r, sb.valueBuf); err != nil {
+		return Value{}, err
+	}
+
+	return Value{Type: valType, Data: sb.valueBuf}, nil
 }
 
+// Skip discards the next value without reading it into memory.
+// Returns io.EOF when values are exhausted.
 func (sb *StreamBlock) Skip() error {
-	return nil
+	// TODO use Seek if underlying reader supports it for better performance
+
+	if sb.nextValIndex >= sb.pairsCount {
+		return io.EOF
+	}
+
+	size := sb.valSizes[sb.nextValIndex]
+	sb.nextValIndex++
+
+	if size == 0 {
+		return nil
+	}
+
+	_, err := io.CopyN(io.Discard, sb.r, int64(size))
+	return err
 }
 
 func growBuf(buf []byte, n int) []byte {
