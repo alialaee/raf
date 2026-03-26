@@ -154,7 +154,7 @@ func NewMarshaler() *Marshaler {
 	}
 }
 
-func (m *Marshaler) Marshal(v any) ([]byte, error) {
+func (m *Marshaler) MarshalInto(v any, buf []byte) ([]byte, error) {
 	builder := m.builderPool.Get().(*Builder)
 	defer m.builderPool.Put(builder)
 	builder.Reset()
@@ -191,10 +191,11 @@ func (m *Marshaler) Marshal(v any) ([]byte, error) {
 	}
 
 	// Copy data to a new slice.
-	result := make([]byte, len(data))
-	copy(result, data)
+	return append(buf, data...), nil
+}
 
-	return result, nil
+func (m *Marshaler) Marshal(v any) ([]byte, error) {
+	return m.MarshalInto(v, nil)
 }
 
 func (m *Marshaler) marshalStruct(builder *Builder, rv reflect.Value) error {

@@ -20,6 +20,8 @@ type Unmarshaler func(data []byte, v any) error
 func benchmarkMarshal[V any](b *testing.B, marshaler Marshaler, objects []V) {
 	b.Helper()
 	b.ReportAllocs()
+
+	b.ResetTimer()
 	for i := range b.N {
 		_, err := marshaler(objects[i%len(objects)])
 		if err != nil {
@@ -50,14 +52,23 @@ func benchmarkUnmarshal[V any](b *testing.B, marshaler Marshaler, unmarshaler Un
 	}
 }
 
+var rafMarshaledData []byte
+
+func rafMarshalInto(v any) ([]byte, error) {
+	var err error
+	rafMarshaledData, err = raf.MarshalInto(v, rafMarshaledData[0:0])
+	return rafMarshaledData, err
+}
+
 func benchmarkAllMarshals[V any](b *testing.B, objects []V) {
 	b.Helper()
 	marshalers := map[string]Marshaler{
-		"RAF":     raf.Marshal,
-		"JSON":    json.Marshal,
-		"MsgPack": msgpack.Marshal,
-		"CBOR":    cbor.Marshal,
-		"BSON":    bson.Marshal,
+		"RAF":             raf.Marshal,
+		"RAF_MarshalInto": rafMarshalInto,
+		"JSON":            json.Marshal,
+		"MsgPack":         msgpack.Marshal,
+		"CBOR":            cbor.Marshal,
+		"BSON":            bson.Marshal,
 	}
 
 	for name, m := range marshalers {

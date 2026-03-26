@@ -43,6 +43,12 @@ func Marshal(v any) ([]byte, error) {
 	return defaultMarshaler.Marshal(v)
 }
 
+// MarshalInto encodes v into the provided buffer and returns the resulting slice.
+// If the buffer is too small, a new buffer will be allocated.
+func MarshalInto(v any, buf []byte) ([]byte, error) {
+	return defaultMarshaler.MarshalInto(v, buf)
+}
+
 // Unmarshal parses the RAF-encoded data and stores the result in the value pointed to by v.
 func Unmarshal(data []byte, v any) error {
 	return defaultUnmarshaler.Unmarshal(data, v)
