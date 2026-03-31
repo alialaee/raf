@@ -77,7 +77,8 @@ type unmarshalOP struct {
 	elemSize uintptr
 
 	// If the field is a struct or a slice of structs, nested contains
-	// the ops for the nested struct(s)
+	// the ops for the nested struct(s) and nil for recursive types,
+	// resolved lazily at unmarshal time via loadOPs.
 	nested []unmarshalOP
 
 	rafName []byte
@@ -175,6 +176,16 @@ func unmarshalValueToAny(val Value) any {
 }
 
 func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
+	return u.compileOPsWithSeen(typ, nil)
+}
+
+func (u *Unmarshaler) compileOPsWithSeen(typ reflect.Type, seen map[reflect.Type]bool) []unmarshalOP {
+	if seen == nil {
+		seen = make(map[reflect.Type]bool)
+	}
+	seen[typ] = true
+	defer delete(seen, typ)
+
 	ops := make([]unmarshalOP, 0, typ.NumField())
 	for field := range typ.Fields() {
 		fieldRafName, skip := fieldName(field)
@@ -200,13 +211,17 @@ func (u *Unmarshaler) compileOPs(typ reflect.Type) []unmarshalOP {
 
 		switch targetKind {
 		case reflect.Struct:
-			ops[len(ops)-1].nested = u.compileOPs(targetType)
+			if !seen[targetType] {
+				ops[len(ops)-1].nested = u.compileOPsWithSeen(targetType, seen)
+			}
 		case reflect.Slice:
 			elemType := targetType.Elem()
 			ops[len(ops)-1].elemKind = elemType.Kind()
 			ops[len(ops)-1].elemSize = elemType.Size()
 			if elemType.Kind() == reflect.Struct {
-				ops[len(ops)-1].nested = u.compileOPs(elemType)
+				if !seen[elemType] {
+					ops[len(ops)-1].nested = u.compileOPsWithSeen(elemType, seen)
+				}
 			}
 		}
 	}
@@ -390,6 +405,25 @@ func (u *Unmarshaler) loadOPs(typ reflect.Type) []unmarshalOP {
 	if !ok {
 		ops = u.compileOPs(typ)
 		u.opsCache.Store(typ, ops)
+		// Resolve any nil nested ops left by recursive type cycles
+		u.resolveLazyOPs(ops.([]unmarshalOP))
 	}
 	return ops.([]unmarshalOP)
+}
+
+// resolveLazyOPs fills in nil nested fields that were deferred during
+// compilation due to recursive types.
+func (u *Unmarshaler) resolveLazyOPs(ops []unmarshalOP) {
+	for i := range ops {
+		switch ops[i].targetKind {
+		case reflect.Struct:
+			if ops[i].nested == nil {
+				ops[i].nested = u.loadOPs(ops[i].targetType)
+			}
+		case reflect.Slice:
+			if ops[i].elemKind == reflect.Struct && ops[i].nested == nil {
+				ops[i].nested = u.loadOPs(ops[i].targetType.Elem())
+			}
+		}
+	}
 }

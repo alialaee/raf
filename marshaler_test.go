@@ -393,6 +393,23 @@ func TestMarshalAndUnmarshalMap(t *testing.T) {
 	}
 }
 
+func TestUnmarshal_RecursiveStruct(t *testing.T) {
+	type Node struct {
+		Value    int    `raf:"value"`
+		Children []Node `raf:"children"`
+	}
+
+	testMarshalUnmarshal_WithSelf(t, Node{
+		Value: 1,
+		Children: []Node{
+			{Value: 2},
+			{Value: 3, Children: []Node{
+				{Value: 4},
+			}},
+		},
+	})
+}
+
 func TestUnmarshal_Failed_InvalidData(t *testing.T) {
 	type A struct {
 		Num int `raf:"num"`
