@@ -239,7 +239,7 @@ go get github.com/alialaee/raf
 
 ## Contributing
 
-Contributions are very welcome! Specially cleaning up the tests and testing more edge cases,and fixing them, but **Please no AI-generated** PRs.
+Contributions are very welcome! Specially cleaning up the tests and testing more edge case.
 
 ## License
 
